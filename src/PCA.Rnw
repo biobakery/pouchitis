@@ -1,0 +1,285 @@
+\documentclass{article}
+\usepackage[sc]{mathpazo}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage{url}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\hypersetup{
+ pdfstartview={XYZ null null 1}}
+\usepackage{breakurl}
+\begin{document}
+
+\title{PCA of pouchitis expression data}
+
+\author{Levi Waldron and Boyko Kabakchiev}
+
+\maketitle
+
+\section{Input arguments}
+
+<<echo=TRUE, cache=FALSE>>=
+print( argslist )  ##show
+for (i in 1:length(argslist))
+    assign(names(argslist)[i], argslist[[i]])  ##assign to memory
+@ %def
+
+Load needed libraries:
+<<message=FALSE>>=
+library(multtest)
+library(gplots)
+library(ClassDiscovery)
+library(biomaRt)
+library(limma)
+library(princyr)
+@ %def
+
+Load gene sets and expression data:
+<<loaddata>>=
+genesets <- readGMT( system.file("extdata/c2.cp.biocarta.v3.1.entrez.gmt", package="princyr") )
+names(genesets) <- gsub("BIOCARTA_|_PATHWAY", "", names(genesets))
+expr.dat <- as.matrix( read.delim(expression.infile, as.is=TRUE, row.names=1, check.names=FALSE) )
+meta.dat <- read.delim(metadata.infile, row.names=1, check.names=FALSE, as.is=TRUE)
+@ %def
+
+Some manual alterations of metadata.  ``individual'' ID is a
+concatenation of ID_1 and ID_2.  Phenotype is equivalent
+to Outcome after merging chronic and acute pouchitis.
+<<>>=
+meta.dat$Individual <- paste(meta.dat[, "ID_1"], meta.dat[, "ID_2"], sep=":::")
+meta.dat$Phenotype <- meta.dat$Outcome
+meta.dat$Phenotype[meta.dat$Phenotype == "CP"] <- "P"
+meta.dat$Phenotype[meta.dat$Phenotype == "AP"] <- "P"
+meta.dat$OutcomeFAP <- ifelse(meta.dat$Outcome=="FAP", "FAP", "nonFAP")
+@
+
+Optionally keep PPI samples only:
+<<PPIonly>>=
+if(keepPPIonly){
+    print("Eliminating non-PPI samples.")
+    meta.dat <- meta.dat[meta.dat$Location == "PPI", ]
+    print("Keeping PPI samples only.")
+}
+expr.dat <- expr.dat[, colnames(expr.dat) %in% rownames(meta.dat)]
+meta.dat <- meta.dat[match(colnames(expr.dat), rownames(meta.dat)), ]
+stopifnot( identical(colnames(expr.dat), rownames(meta.dat)) )
+dim(meta.dat)
+dim(expr.dat)
+@ %def
+
+
+Sample filter OR batch correction first making sure that expression
+and metadata sample names are identical:
+<<>>=
+if( identical(outcome.regex, "anova") ){
+    facToDesign <- function(x){
+        x <- as.factor(x)
+        contrasts(x) <- contr.sum(levels(x))
+        model.matrix(~x)[, -1, drop = FALSE]
+    }
+    covar <- do.call(cbind, sapply(meta.dat[, grepl(anova.regex, colnames(meta.dat))], facToDesign))
+    expr.dat <- removeBatchEffect(expr.dat, covariates=covar)
+    keep.col <- rep(TRUE, ncol(expr.dat))
+}else{
+    keep.col <- grepl( outcome.regex, meta.dat$Outcome )
+}
+@ %def
+
+<<varfilter>>=
+expr.var <- apply(expr.dat, 1, var)
+expr.quant <- quantile(expr.var, var.filter.quantile)
+expr.dat.filt <- expr.dat[expr.var > expr.quant, ]
+dim(expr.dat)
+dim(expr.dat.filt)
+@
+
+<<filterhists, echo=FALSE, fig.cap="Variance filter">>=
+par(mfrow=c(3, 1))
+hist(expr.var, xlab="Gene variance", xlim=c(0, 0.25), breaks="FD")
+legend("topright", lty=1, pch=-1, col="green", legend="variance filter")
+abline(v=expr.quant, col="green", lw=3)
+hist(expr.dat, main="Expression of All Genes", breaks="FD")
+qprobs <- seq(0.1, 0.9, by=0.1)
+abline(v=quantile(expr.dat, probs=qprobs), col="red", lty=1, lw=2)
+legend("topright", lty=1, pch=-1, col="red", legend="deciles before filtering")
+hist(expr.dat.filt, main="Expression of Unfiltered Genes", breaks="FD")
+abline(v=quantile(expr.dat, probs=qprobs), col="red", lty=1, lw=2)
+abline(v=quantile(expr.dat.filt, probs=qprobs), col="red", lty=2, lw=2)
+legend("topright", lty=1:2, pch=-1, col="red",
+       legend=c("deciles before filtering", "deciles after filtering"))
+@ %def
+
+
+
+
+Do the GSEA using only the desired columns:
+<<gsea>>=
+pca.gsea <- princyr::PcaGsea(expr.dat.filt[, keep.col], genesets,
+                    cumulative.proportion=prop.var.explained, n=n.comp, scale.=scale.data)
+dim(pca.gsea$raw.pval)
+(n.comp <- ncol(pca.gsea$raw.pval))
+@ %def
+
+Calculate scores for all columns:
+<<scores>>=
+pca.scores <- predict( pca.gsea$prcomp.obj, newdata=t(expr.dat.filt) )[, 1:n.comp]
+@ %def
+
+Gene symbols with highest magnitude of loadings, surrounded by
+brackets if negative:
+<<biomart, echo=FALSE>>=
+ensembl<- useMart("ensembl", dataset="hsapiens_gene_ensembl")
+entrez.ids <- rownames(pca.gsea$loadings)
+genes <- getBM(attributes = c("entrezgene", "hgnc_symbol"),
+               mart=ensembl, filter="entrezgene", values=entrez.ids)
+genemap <- sapply(entrez.ids, function(x) genes[na.omit(match(x, genes[, 1]))[1], 2])
+genemap <- data.frame(entrez=names(genemap), hgnc=genemap, stringsAsFactors=FALSE)
+top.hgnc.mat <- matrix(NA, nrow=n.top.loadings, ncol=ncol(pca.gsea$loadings))
+colnames(top.hgnc.mat) <- colnames(pca.gsea$loadings)
+for (i in 1:ncol(pca.gsea$loadings)){
+    top.entrez <-
+        rownames(pca.gsea$loadings)[ rank(-abs(pca.gsea$loadings[, i])) <= n.top.loadings ]
+    top.hgnc <- genemap[match(top.entrez, genemap$entrez), "hgnc"]
+    if( negative.loadings.in.brackets ){
+        top.hgnc <- paste(ifelse(pca.gsea$loadings[top.entrez, i] < 0, "(", ""),
+                            top.hgnc, sep="")
+        top.hgnc <- paste(top.hgnc,
+                            ifelse(pca.gsea$loadings[top.entrez, i] < 0, ")", ""), sep="")
+    }
+    top.hgnc.mat[, i] <- top.hgnc
+}
+top.hgnc.mat
+@ %def
+
+<<FDRpval, echo=FALSE, message=FALSE, fig.cap="Heatmap of False Discovery Rate (BH method)-corrected GSEA p-values, displaying only PCs and gene sets which have at least one corrected p-value less than bonferroni.threshold.">>=
+##Use the multtest package with a friendlier interface.  x is your
+##vector of raw p values, and the output is the corrected vector with
+##the order maintained.
+adjp <- function(x,proc="BH",...){
+  require(multtest)
+  tmp <- mt.rawp2adjp(x,proc=proc,...)
+  tmp <- tmp$adjp[order(tmp$index),]
+  rownames(tmp) <- names(x)
+  return(tmp)
+}
+gsea.fdr <- apply(pca.gsea$raw.pval, 2, function(x) adjp(x)[,"BH"])
+gsea.fdr <- gsea.fdr[apply(gsea.fdr, 1, function(x) min(x) < bonferroni.threshold), ]
+gsea.fdr[gsea.fdr > 0.5] <- 1
+try( heatmap.2(log10(gsea.fdr), trace='none', mar=c(5, 7)) )
+@
+
+<<GSEAheatmap, echo=FALSE, message=FALSE, fig.cap="Heatmap of Bonferroni-corrected GSEA p-values, displaying only PCs and gene sets which have at least one corrected p-value less than bonferroni.threshold.">>=
+gsea.bonf <- pca.gsea$raw.pval * ( nrow(pca.gsea$raw.pval) )# * ncol(pca.gsea$raw.pval) )
+gsea.bonf[gsea.bonf > 1] <- 1
+gsea.bonf <- gsea.bonf[apply(gsea.bonf, 1, min) < bonferroni.threshold, ]
+gsea.bonf <- gsea.bonf[, apply(gsea.bonf, 2, min) < bonferroni.threshold]
+try( heatmap.2(log10(gsea.bonf), trace='none', mar=c(5, 7)) )
+@ %def
+
+
+Make a ``cheat-sheet'' of the representative genes plus PCs:
+<<cheatsheet>>=
+gsea.tophits <- data.frame(entrezgene=colnames(gsea.fdr),
+                           hgnc_symbol=apply(gsea.fdr, 2, function(x){
+                               paste(rownames(gsea.fdr)[x < bonferroni.threshold], collapse=", ")
+                           }),
+                           mim_gene_description=sapply(1:ncol(top.hgnc.mat), function(i)
+                           paste(top.hgnc.mat[,i], collapse=" ")),
+                           chromosome_name=NA, band=NA)
+repgenes <- read.table(repgenes.infile, as.is=TRUE, header=TRUE)
+##repgenes <- repgenes[repgenes$Include==1, 2]
+genes.map <- getBM(attributes = c("entrezgene", "hgnc_symbol", "mim_gene_description",
+                                  "chromosome_name", "band"),
+                   mart=ensembl, filter="entrezgene", values=repgenes$EntrezID)
+genes.map <- genes.map[!grepl("HSCHR|LRG", genes.map$chromosome_name), ]
+genes.map <- genes.map[order(genes.map$hgnc_symbol), ]
+genes.map2 <- list()
+for (i in 1:ncol(genes.map))
+    genes.map2[[i]] <- tapply(genes.map[, i], genes.map[, 1],
+                             function(x) paste(unique(x), collapse="///"))
+genes.map2 <- do.call(cbind, genes.map2)
+colnames(genes.map2) <- colnames(genes.map)
+cheatsheet <- rbind(genes.map2, gsea.tophits)
+write.csv(cheatsheet, file=paste(output.dir, "cheatsheet.csv", sep="/"), row.names=FALSE)
+@
+
+<<PCAscreeplot, echo=FALSE, message=FALSE, fig.cap="Screeplot for the PCA.">>=
+par.orig <- par(mar=c(5, 4, 4, 5) + 0.1)
+barplot.x <- barplot( summary(pca.gsea$prcomp.obj)$importance["Proportion of Variance", 1:n.comp],
+                     ylab="Individual Proportion of Total Variance", xlab="Component",
+                     xlim=c(0, n.comp+2))
+par(new=TRUE)
+plot(x=seq(0.75, n.comp+1, length.out=n.comp),
+     y=summary(pca.gsea$prcomp.obj)$importance["Cumulative Proportion", 1:n.comp],
+     ylim=c(0, max(summary(pca.gsea$prcomp.obj)$importance["Cumulative Proportion", 1:n.comp])),
+     xlim=c(0, n.comp+2),
+     ylab="", xlab="", xaxt='n', yaxt='n',
+     type="b")
+axis(4)
+mtext("Cumulative Proportion of Total Variance", side=4, line=3)
+legend("right", pch=c(15, 1), lty=c(-1, -1), pt.cex=c(2, 1),
+       legend=c("Individual", "Cumulative"),
+       col=c("grey", "black"))
+par(par.orig)
+@ %def
+
+<<PCAloadings, echo=FALSE, fig.cap="Histrograms of \textbf{loadings} for the components under consideration.">>=
+par(mfrow=c(ceiling(n.comp/3), 3), mar=c(5, 4, 0.5, 0.5))
+for (i in 1:n.comp)
+    hist( pca.gsea$loadings[, i],
+         font.lab=2,
+         main="",
+         xlab=paste("PC", i, sep=""),
+         breaks="FD")
+@ %def
+
+<<PCAscores, echo=FALSE, fig.cap="Histrograms of \textbf{scores} for the components under consideration.">>=
+pca.bi <- ClassDiscovery::bimodalIndex(t(pca.scores))
+par(mfrow=c(ceiling(n.comp/3), 3), mar=c(5, 4, 0.5, 0.5))
+for (i in 1:n.comp){
+    hist.dat <- try(hist( pca.scores[, i],
+                     font.lab=2,
+                     main="",
+                     xlab=paste("PC", i, sep=""),
+                     breaks="FD"))
+    if(class(hist.dat) == "try-error")
+        hist.dat <- hist( pca.scores[, i],
+                         font.lab=2,
+                         main="",
+                         xlab=paste("PC", i, sep=""))
+    x.seq <- seq(min(pca.scores[, i]), max(pca.scores[, i]), length.out=100)
+    model.density <- pca.bi[i, "pi"] * dnorm(x.seq, mean=pca.bi[i, "mu1"], sd=pca.bi[i, "sigma"]) +
+        (1 - pca.bi[i, "pi"]) * dnorm(x.seq, mean=pca.bi[i, "mu2"], sd=pca.bi[i, "sigma"])
+    lines(x.seq, model.density * max(hist.dat$counts) / max(model.density),
+          lw=2, col="green" )
+    legend.pos <- ifelse(which.max(hist.dat$counts) / length(hist.dat$counts) > 0.5, "topleft", "topright")
+    legend2.pos <- ifelse(legend.pos == "topleft", "topright", "topleft")
+    legend(legend.pos, bty='n',
+           legend=c("Bimodality",
+           paste("BI=", round(pca.bi[i, "BI"], 1), sep=""),
+           paste("delta=", round(pca.bi[i, "delta"], 1), sep=""),
+           paste("pi=", round(pca.bi[i, "pi"], 1), sep="")))
+    legend(legend2.pos, legend=paste(sum(abs(pca.scores[,i]) < 1e-9),"zeros"), bty='n')
+}
+@ %def
+
+<<writecsv>>=
+write.csv(pca.scores, file=scores.outfile)
+frac.var=summary(pca.gsea$prcomp.obj)$importance["Proportion of Variance", 1:n.comp]
+pca.names <- paste(colnames(gsea.fdr), " (", round(frac.var*100), "%)", sep="")
+colnames(pca.gsea$loadings) <- pca.names
+write.csv(pca.gsea$loadings, file=loadings.outfile)
+@
+
+\newpage
+\subsection{Session Info}
+<<sessioninfo>>=
+sessionInfo()
+@
+
+
+\end{document}

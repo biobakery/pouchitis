@@ -1,0 +1,3 @@
+-v DEBUG -F ISCORE,Antibiotics,OutcomeFAP -G 0.05 -d 0.25 -p 0 -l none -s none -a
+
+

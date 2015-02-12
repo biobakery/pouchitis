@@ -1,0 +1,304 @@
+\documentclass{article}
+\usepackage[sc]{mathpazo}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage{url}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\hypersetup{
+ pdfstartview={XYZ null null 1}}
+\usepackage{breakurl}
+\begin{document}
+
+\title{LDA multiclass prediction}
+
+\author{Levi Waldron}
+
+\maketitle
+
+\section{Summary}
+
+Prediction of outcome (AP, CDL, CP, FAP, NP) using Linear Discriminant
+Analysis.  Note that LDA does not work with modules, complaining that
+``In lda.default(x, grouping, ...) : variables are collinear'' so we
+perform the fits only to gene and bug data.
+
+
+Needed libraries:
+<<libs, message=FALSE>>=
+library(pheatmap)
+library(ggplot2)
+library(pROC) 
+library(MASS)
+library(caret)
+library(LeviRmisc)
+@ 
+
+\section{Input arguments}
+
+<<args, echo=TRUE>>=
+print( argslist )  ##show
+for (i in 1:length(argslist))
+    assign(names(argslist)[i], argslist[[i]])  ##assign to memory
+@ %def
+
+\section{Loading and preparing the data}
+
+Load data using readPCL from the LeviRmisc package, and use only PPI samples:
+<<loaddata, echo=TRUE, dependson="args">>=
+all.data <- readPCL(clustering.outfile, number.pheno.rows=0)[[1]]
+dim(all.data)  #rows are samples, columns are variables
+@ 
+
+<<loaddata2, dependson="loaddata">>=
+if(is.null(subset.samples)){
+    print("Using all samples.")
+}else{
+    for (i in 1:nrow(subset.samples))
+        all.data <- all.data[ (all.data[[subset.samples[i, 1]]] == subset.samples[i, 2]), ]
+}
+dim(all.data)
+@ 
+
+Split into gene, bug, and gene+bug data, with an ``Outcome'' column for each:
+<<splitdata, echo=TRUE, dependson="loaddata2">>=
+outcome.column <- match("Outcome", colnames(all.data))
+gene.data <- all.data[, c(outcome.column, 1:(match("PC1", colnames(all.data))-1))]
+bug.data <- all.data[, c(outcome.column, grep("^k__", colnames(all.data)))]
+buggene.data <- cbind(gene.data, bug.data[, -1])
+mod.data <- all.data[, c(outcome.column, grep("M00", colnames(all.data)))]
+##Some modules have many zero values, so we filter out modules that have 50 or fewer non-zero values.
+mod.data <- mod.data[, c(TRUE, apply(mod.data[, -1], 2, function(x) sum(abs(x) > 1e-15)) > 150)]
+##Scale data to unit variance:
+for (i in grep("Outcome", colnames(gene.data), invert=TRUE)){
+    gene.data[, i] <- scale(gene.data[, i])
+}
+#
+for (i in grep("Outcome", colnames(bug.data), invert=TRUE)){
+    bug.data[, i] <- scale(bug.data[, i])
+}
+#
+for (i in grep("Outcome", colnames(buggene.data), invert=TRUE)){
+    buggene.data[, i] <- scale(buggene.data[, i])
+}
+@
+
+\section{Confounding between outcome and antibiotics usage}
+
+The confounding betwen chronic pouchitis outcome and antibiotics usage is strong: 81\%
+of chronic pouchitis patients are antibiotics ``yes'', in contrast to
+9-36\% for all other Outcome labels:
+
+<<outcomeabx, dependson="loaddata2">>=
+summary(all.data$Antibiotics)
+table(all.data$Antibiotics, all.data$Outcome)  ##counts
+round(apply(table(all.data$Antibiotics, all.data$Outcome), 2, function(x) x*100/sum(x))) ##percentages
+@ 
+
+\section{Model Training}
+
+LDA fitting with leave-one-out cross-validation:
+<<ldafit, results="hide", message=FALSE, warning=FALSE, dependson="splitdata">>=
+set.seed(1)
+folds <- caret::createFolds(y=gene.data$Outcome, k=10)
+##
+gene.fit.cv <- lapply(folds, function(idx){
+    gene.fit <- lda(Outcome ~ ., data=gene.data[-idx, ], CV=FALSE)
+    predict(gene.fit, newdata=gene.data[idx, ])$posterior
+})
+gene.fit.cv <- do.call(rbind, gene.fit.cv)
+if(identical(nrow(gene.fit.cv) == nrow(gene.data), TRUE)){
+    gene.fit.cv <- gene.fit.cv[match(rownames(gene.data), rownames(gene.fit.cv)), ]
+}
+stopifnot(identical(all.equal(rownames(gene.data), rownames(gene.fit.cv)), TRUE))
+##
+bug.fit.cv <- lapply(folds, function(idx){
+    bug.fit <- lda(Outcome ~ ., data=bug.data[-idx, ], CV=FALSE)
+    predict(bug.fit, newdata=bug.data[idx, ])$posterior
+})
+bug.fit.cv <- do.call(rbind, bug.fit.cv)
+if(identical(nrow(bug.fit.cv) == nrow(gene.data), TRUE)){
+    bug.fit.cv <- bug.fit.cv[match(rownames(gene.data), rownames(bug.fit.cv)), ]
+}
+stopifnot(identical(all.equal(rownames(gene.data), rownames(bug.fit.cv)), TRUE))
+##
+buggene.fit.cv <- lapply(folds, function(idx){
+    buggene.fit <- lda(Outcome ~ ., data=buggene.data[-idx, ], CV=FALSE)
+    predict(buggene.fit, newdata=buggene.data[idx, ])$posterior
+})
+buggene.fit.cv <- do.call(rbind, buggene.fit.cv)
+if(identical(nrow(buggene.fit.cv) == nrow(gene.data), TRUE)){
+    buggene.fit.cv <- buggene.fit.cv[match(rownames(gene.data), rownames(buggene.fit.cv)), ]
+}
+stopifnot(identical(all.equal(rownames(gene.data), rownames(buggene.fit.cv)), TRUE))
+@ 
+
+\section{ROC plots}
+
+ROC plots for each outcome, using bugs only, genes only, and bugs plus genes.
+
+<<buggene.roc, results="hide", message=FALSE, dependson=c("ldafit", "splitdata"), fig.cap="ROC plots for each possible outcome using genes only, bugs only, and bugs + genes.  For each model, the ROC plot was constructed using the roc function from the pROC library, from 10-fold cross-validated posterior probabilities from the lda function of the MASS library.">>=
+par(mfrow=c(3,3))
+aucdat <- list()
+for (lab in levels(gene.data$Outcome)){ 
+aucdat[[lab]][["gene"]] <- plot(roc(gene.data$Outcome==lab,
+             gene.fit.cv[, lab], ci=TRUE), ci.type="bars", print.auc=TRUE,
+         main=paste(lab, "(gene)"))
+aucdat[[lab]][["bug"]] <- plot(roc(bug.data$Outcome==lab,
+             bug.fit.cv[, lab], ci=TRUE), ci.type="bars", print.auc=TRUE,
+         main=paste(lab, "(bug)"))
+aucdat[[lab]][["gene.bug"]] <- plot(roc(buggene.data$Outcome==lab,
+             buggene.fit.cv[, lab], ci=TRUE), ci.type="bars",
+         print.auc=TRUE, main=paste(lab, "(bug + gene)"))
+}
+@ 
+
+<<aucsum, dependson="buggene.roc">>=
+aucsum <- lapply(aucdat, function(auc.1){
+    output <- t(sapply(auc.1, function(x) x$ci))
+    colnames(output) <- c("lower", "auc", "upper")
+    return(data.frame(output))
+})
+for (i in 1:length(aucsum)){
+    aucsum[[i]]$phenotype <- names(aucsum)[i]
+    aucsum[[i]]$covariate <- factor(sub("gene.bug", "bug + gene", rownames(aucsum[[i]]), fixed=TRUE), levels=c("bug", "gene", "bug + gene"))
+}
+auc.df <- do.call(rbind, aucsum)
+@ 
+
+
+<<aucbarggplot, echo=FALSE, dependson="aucsum", fig.cap="Area under the curve for LDA prediction models.  A single model was fit with a 5-level response.  10-fold cross-validated class probabilities for each level (AP, CDL, CP, FAP, NP) were used to construct ROC plots for that outcome.  95 percent confidence intervals were estimated using the ci function from the pROC package.">>=
+## Error bars represent confidence interval
+ggplot(auc.df, aes(x=phenotype, y=auc, fill=covariate)) + 
+    geom_bar(position=position_dodge(), stat="identity") +
+    scale_fill_manual(values=gray(c(0.9, 0.7, 0.5))) +
+    theme_bw() +
+    ylim(c(0, 1)) +
+    ylab("AUC") + xlab("Phenotype") +
+    geom_hline(yintercept=0.5, colour="black", linetype=2) +
+    geom_errorbar(aes(ymin=lower, ymax=upper),
+                  width=.2,                    # Width of the error bars
+                  position=position_dodge(.9))
+@ 
+
+<<aucbarplot, echo=FALSE, dependson="aucsum", fig.cap="As previous figure, using traditional graphics">>=
+par(las=1, cex=1.5, xpd=FALSE)
+xpos <- barplot(height=auc.df$auc, space=rep(c(1, 0.1, 0.1), 5), ylim=c(0.5, 1), 
+                cex.axis=1, col=gray(c(0.9, 0.7, 0.5)))
+abline(h=seq(0.6, 0.9, by=0.1), lty=3, col="lightgrey")
+barplot(height=auc.df$auc, space=rep(c(1, 0.1, 0.1), 5), col=gray(c(0.9, 0.7, 0.5)), 
+        cex.axis=1, ylab="Area Under ROC Curve", add=TRUE)
+abline(h=0.5, lty=2, lw=1.5)
+tmp <- legend("topright", fill=gray(c(0.9, 0.7, 0.5)), 
+              legend=auc.df$covariate[1:3],
+              bg="white", border="black", bty='o', box.col="white")
+par(xpd=NA)
+text(tmp$rect$left, tmp$rect$top, labels="Predictors:", pos=4)
+arrows(x0=xpos[, 1], y0=auc.df$lower, y1=auc.df$upper, angle=90, length=0.03, code=3, lw=1.5)
+@ 
+
+\section{Full models}
+
+Fit full models for looking at the variable importance and LDA meanings:
+<<fullmodels, dependson="splitdata">>=
+gene.fit <- lda(Outcome ~ ., data=gene.data, CV=FALSE)
+bug.fit <- lda(Outcome ~ ., data=bug.data, CV=FALSE)
+buggene.fit <- lda(Outcome ~ ., data=buggene.data, CV=FALSE)
+@ 
+
+<<ldahist.gene, echo=FALSE, dependson="fullmodels", fig.cap="LDA scores scatterplots for the phenotypes, showing which LDAs discriminate which phenotypes.  For genes.">>=
+plot(gene.fit, dimen=4)
+@ 
+
+<<ldahist.bugs, echo=FALSE, dependson="fullmodels", fig.cap="LDA scores scatterplots for the phenotypes, showing which LDAs discriminate which phenotypes.  For bugs.">>=
+plot(bug.fit, dimen=4)
+@ 
+
+<<heatmapfun>>=
+funcHeatmap <- function(xdat, ldafit, quantile.threshold=0.9, ...){
+    ##Thresholding
+    dat <- ldafit$scaling
+    rownames(dat) <- shortenCladeName(rownames(dat), separator = ".")
+    dat.thresh <- dat
+    cutoff <- quantile(abs(dat.thresh), quantile.threshold)
+    dat.thresh[abs(dat.thresh) < cutoff] <- 0
+    dat.thresh <- dat.thresh[apply(dat.thresh, 1, function(x) sum(x != 0) > 0), ]
+    dat.unthresh <- dat[rownames(dat.thresh), ]
+    ## predictions from each LDA individually:
+    preds <- apply(dat, 2, function(x) as.matrix(xdat[, -match("Outcome", colnames(xdat))]) %*% x)
+    ## linear model coefficients:
+    coefs <- apply(preds, 2, function(x) lm(x ~ xdat$Outcome)$coefficients)
+    rownames(coefs) <- sub("xdat$Outcome", "", rownames(coefs), fixed=TRUE)
+    ##Default intercept is AP:
+    rownames(coefs)[1] <- "AP"
+    ##subtract NP values:
+    coefs <- sweep(coefs, 2, coefs["NP", ])
+    ##get rid of the NP row, which is now all zero:
+    coefs <- coefs[-match("NP", rownames(coefs)), ]
+    ##What is the sign of the highest-magnitude coefficient?
+    signs <- apply(coefs, 2, function(y) sign(y)[which.max(abs(y))])
+    ##Change signs of LDA weights, so that the largest-magnitude mean value in any outcome is positive:
+    dat.switchsign <- sweep(dat.thresh, 2, signs, FUN="*")
+    ## custom breaks that represent the thresholding correctly:
+    absmax <- max(abs(dat.switchsign))
+    mybreaks <- c(seq(-absmax, -cutoff, length.out=10),
+                  seq(cutoff, absmax+1, length.out=10))
+    ##finally the heatmap:
+    LeviRmisc::heatmap.3(dat.switchsign, Colv=FALSE, dendrogram="row",
+                         sepcolor="white", rowsep=1:nrow(dat.switchsign), colsep=1:ncol(dat.switchsign),
+                         col = colorRampPalette(rev(c("#D73027", "lightgrey", "#4575B4")))(19), 
+                         breaks=mybreaks,
+                         trace="none", density.info="none", col.srt=45, ...)
+    return(list(coefs=coefs, coefs.switchsign=sweep(coefs, 2, signs, "*"), 
+                dat.switchsign=dat.switchsign, signs=signs))
+}
+@ 
+
+\section{LDA weights}
+
+Tables show the coefficient of a linear model for predictions from
+only one set of LD coefficients as described by outcome, with NP as
+the intercept.  In other words, it shows the mean LDA predictions
+using only one LDA axis, relative to the mean in NP.  If the largest
+magnitude for an LD is negative, the signs of that column are changed,
+as well as the corresponding heatmap, to simplify visualization.
+
+Mean of a predictor based on one LD of the \emph{genes} model within each outcome:
+
+<<pheatmap.gene, echo=FALSE, dependson=c("fullmodels", "heatmapfun"), fig.cap="LDA weights for genes model.  Weights below the 95th percentile are thresholded to zero, and only rows with at least one non-zero coefficient are shown.  Means are relative to Positive coefficients mean that a gene is higher in the outcome shown. ">>=
+round(funcHeatmap(xdat=gene.data, ldafit=gene.fit, quantile.threshold=0.95)$coefs.switchsign, 1)
+@ 
+
+Mean of a predictor based on one LD of the \emph{bugs} model within each outcome:
+
+<<pheatmap.bug, echo=FALSE, dependson=c("fullmodels", "heatmapfun"), fig.cap="LDA weights for bugs model.  Note that FAP appears twice here because the LD axes are not distinctive individual outcomes.  See the output of funcHeatmap to confirm; but columns might better be labelled: CP, AP vs. CDL+FAP, FAP, NP vs CP. But again, there is some mixing between the LDs and outcomes.">>=
+round(funcHeatmap(xdat=bug.data, ldafit=bug.fit, quantile.threshold=0.90, margins=c(5, 15))$coefs.switchsign, 1)
+@
+
+Mean of a predictor based on one LD of the \emph{bugs + genes} model within each outcome:
+
+<<pheatmap.buggene, echo=FALSE, dependson=c("fullmodels", "heatmapfun"), fig.cap="LDA weights for bugs plus genes model.">>=
+round(funcHeatmap(xdat=buggene.data, ldafit=buggene.fit, quantile.threshold=0.95, margins=c(5, 15))$coefs.switchsign, 1)
+@ 
+
+\section{Enterococcus}
+
+<<enterococcus, fig.cap="Enterococcus abundance in each outcome">>=
+par(mfrow=c(2, 1))
+boxplot(k__Bacteria.p__Firmicutes.c__Bacilli.o__Lactobacillales.f__Enterococcaceae.g__Enterococcus.5606 ~ Outcome, data=bug.data, col="grey", main="g__Enterococcus.5606")
+stripchart(k__Bacteria.p__Firmicutes.c__Bacilli.o__Lactobacillales.f__Enterococcaceae.g__Enterococcus.5606 ~ Outcome, data=bug.data, add=TRUE, method="jitter", vertical=TRUE, pch=21)
+#
+boxplot(k__Bacteria.p__Proteobacteria.c__Betaproteobacteria.o__Burkholderiales.f__Alcaligenaceae.g__Sutterella ~ Outcome, data=bug.data, col="grey", main="g__Sutterella")
+stripchart(k__Bacteria.p__Proteobacteria.c__Betaproteobacteria.o__Burkholderiales.f__Alcaligenaceae.g__Sutterella ~ Outcome, data=bug.data, add=TRUE, method="jitter", vertical=TRUE, pch=21)
+@ 
+\newpage
+\subsection{Session Info}
+<<sessioninfo>>=
+sessionInfo()
+@
+
+\end{document}

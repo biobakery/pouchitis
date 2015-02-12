@@ -1,0 +1,105 @@
+Gene Symbol,Entrez,Medoid,Include,Notes
+ADCY3,109,1,1,adenylate cyclase 3 - cAMP messenger release
+ATG16L1,55054,2,1,autophagy-related protein 16.  Part of complex that targets cellular garbage to lysozomes for disposal
+C13orf31,144811,3,1,"laccase (copper oxidoreductase), near a DAG kinase zeta"
+C5orf56,441108,4,1,near interferon regulatory factor 1 & interleukin 5
+CARD11,84433,5,1,interacts w/ BCL10 which is positive regulator of apoptosis & NFKb
+CARD9,64170,6,1,interacts w/ BCL10 which is positive regulator of apoptosis & NFKb
+CCDC122,160857,7,1,This is the same locus as 144811.
+CCDC88B,283234,8,1,"coiled-coil domain, possibly involved in linking organelles to microtubules.  Near estrogen receptor & peroxiredoxin 5"
+CCL13,6357,9,1,"Cytokine.   chemotactic activity for monocytes, lymphocytes, basophils and eosinophils,  not neutrophils.  V close to 6347"
+CCL2,6347,10,0,"Cytokine, chemotactic activity for monocytes and basophils,  not  neutrophils or eosinophils. V close to 6357"
+CCR6,1235,5,0,receptor for macrophage inflammatory protein 3 alpha 
+CD14,929,-,1,Associated w/ TLR4 (LPS)
+CD226,10666,11,0,"glycoprotein on NK cells, platelets, monocytes, subset of T cells.  IG2-like, mediates adhesion to vascular endothelial cells"
+CD40,958,5,0,"CD40, regulates IG switching & memory Bs."
+CD48,962,5,0,"CD2-like, on lymphocytes,  dendritic, and endothelial.  Activation & differentiation"
+CD6,923,12,1,"T-cell activation, really close to CD5."
+COMMD7,149951,13,1,next to BCL2 antagonist 1.  BCL2 = apoptosis preventer associated w/ lymphoma
+CPSF3L,54973,14,1,"associated w/ RNA polymerase 2, processes snRNAs.  Nothing else likely nearby.  Regulator?"
+CREM,1390,15,1,"cAMP -responsive tx factor, near Cyclin Y & some snRNAs"
+CSF2,1437,16,1,colony stim factor 2 for granulocyte & macrophage.  Next to IL3
+CTSW,1521,17,1,"in NK & cytotoxic T's, helps or regulates cell lysis? Near some growth factors."
+CXCL1,2919,10,0,"secreted by cxc2 stimulation, attracts neutrophils"
+CXCL3,2921,18,1,"not described, but next to cxcL5 "
+CXCL5,6374,10,0,"expressed along w/ IL8 in response to IL1 & TNFa, attracts neutrophils"
+CXCR2,3579,10,0,"interleukin 8's receptor, attracts neutrophils"
+DAP,1611,19,1,death-associated protein.  This + ifng = death
+DOK3,79930,5,0,"docking protein 3, no idea, not near anything that stands out"
+EPO,2056,20,1,"eryththropoetin, makes you grow red cells & hemoglobin"
+ERAP2,64167,21,1,"antigen trimming prior to MHC presentation, several others nearby"
+FADS2,9415,22,1,a bunch of fatty acid desaturases at this locus
+FAM55A,120400,23,1,a bunch of brain neuropeptides (neurexophilins) at this locus
+FASLG,356,24,1,"FAS ligand, necessary for apoptosis"
+FCGR2A,2212,10,0,receptor on neutrophils & macrophages
+FCGR2B,2213,5,0,"receptor, phagocytosis & antibody prod. Regulation in bcells"
+FCGR3A,2214,10,0,"receptor on NKs, involved in antigen/antibody complex removal"
+FOS,2353,25,1,Part of AP1 transcription factor (LPS -> MAP kinase cascade -> AP1 activated)
+FUT2,2524,26,1,Has to do withblood  antigen A & B secretion
+GPR35,2859,27,1,"g-protein coupled receptor, function unknown, no likely neighbors"
+GPR65,8477,28,0,"another GPCR, function unknown, no likely neighbors"
+HLA-DQA1,3117,29,1,"Histocompatibility complex alpha chain, right next to 3119"
+HLA-DQB1,3119,30,1,"Histocompatibility complex beta chain, right next to 3117"
+HSPA6,3310,31,1,"heat shock protein, next to a bunch of transfer RNAs"
+IFNAR1,3454,32,1,IFNa & B receptor -> Stat1 & Stat2 activation.  Next to IL10 receptor & Ifng receptor 3460
+IFNG,3458,33,1,"cytokine, antitumor, antiviral, immunoregulatory, strong macrophage activator.  Next to IL26 & IL22"
+IFNGR2,3460,34,1,"Ifng receptor (nonligand subunit), right next to 3454.  Associated w/ mycobacter. Susceptibility"
+IL1-RN,3557,-,1,Interleukin 1 receptor antagonist
+IL10,3586,35,1,"downregulates TH1, blocks NFKb, regulates jak/stat, next to IL19 & 20"
+IL12B,3593,36,1,"expressed by macrophages, upregulates & sustains TH1"
+IL13,3596,37,1,"produced by TH2, drives asthmalike, inhibits inflammatory, next to IL4 & 5"
+IL15RA,3601,38,1,"receptor for IL15, next to receptor for IL2.  IL2 & 15 are v similar.  3601 / 3559 prob redundant"
+IL19,29949,39,1,"IL10-like, can cause STAT3 activation"
+IL2,3558,40,1,Drives T & B cell proliferation
+IL20,50604,41,1,"Like IL10, can cause stat3 act., very close to IL19 29949 & IL10 3586"
+IL23R,149233,42,1,"binds IL23 to activate Stat3, next to IL12 receptor"
+IL24,11009,43,1,"IL10 family, next to 19 & 20 but more related to melanoma.  "
+IL2RA,3559,28,1,"receptor for IL2, next to IL15 receptor, 3601 / 3559 prob redundant"
+IL3,3562,44,1,"next to CSF2 1437, another colony stimulating factor"
+IL4,3565,45,1,"has to do with stat6, very close to IL4."
+IL6,3569,-,1,"interleukin 6 anti-inflammatory, activates IL1RN"
+IL6ST,3572,46,0,regulates myocyte apoptosis
+IL8,3576,-,1,"interleukin 8, secreted by macrophages as result of TLR stimulation"
+IRF1,3659,47,1,"activates ifna & b tx, and tx of ifna, b, & g target genes.  Next to IL5"
+IRF5,3663,48,1,"some other interferon reg factor, not well described"
+ITGAL,3683,11,0,integrin lymphocyte function-associated antigen-1
+JAK2,3717,46,1,required for IFNg response
+LIF,3976,49,1,"leukemia inhibitory factor, need for blood differentiation"
+LITAF,9516,10,0,"LPS activates this gene, which induces  TNFa transcription.  P53 induces this gene too."
+MAP3K8,1326,50,1,"MAP kinase, drives jnK / nfkb activation/ TNFa & IL2 production"
+MMEL1,79258,51,1,"membrane metallo-endopeptidase-like 1.  No idea, no likely  neighbors"
+MST1,4485,52,1,macrophage stimulating 1
+MUC1,4582,53,1,Mucin! Essential for barrier integrity.
+NFKB1,4790,54,1,"NFKb, an essential driver of inflammation"
+NOD2,64127,10,1,"LPS activates this gene, which leads to nfkb activation"
+NOX3,50508,-,1,NADPH oxidase 3  - weak association with pouchitis
+PFKFB4,5210,55,0,"6-phosphofructo-2-kinase/fructose-2,6-biphosphatase 4.  No idea, no likely neighbors"
+PNKD,25953,56,1,paroxysmal nonkinesigenic dyskinesia. No idea and no likely neighbors
+PRKCB,5579,5,0,"protein kinase c, signals B cell activation, apoptosis induction, endothelial cell proliferation, and intestinal sugar absorption. "
+PTPN2,5771,57,1,"protein tyrosine phosphatase, non-receptor type 2.  Signals something, GOK what, no idea or likely neighbors"
+RASGRP1,10125,11,1,"RAS activator, activates ERK & MAP kinase cascade"
+REL,5966,28,0,NFKb family tx factor
+RGS14,10636,58,1,"regulator of G-protein signaling 14, no idea or likely neighbors"
+RIT1,6016,59,1,part of p38 map kinase cascade
+RMI2,116028,60,1,homologous recombination.  No likely neighbors
+RPS6KA2,6196,61,1,phosphorylates some Map kinase members
+SDCCAG3,10807,62,1,"colon cancer antigen, really close to 64170 card9.  "
+SFMBT1,51460,63,1,antigen recognition?
+SLC11A1,6556,64,1,"iron/manganese transporter associated w/ leprosy, CD, & RA"
+SLC22A4,6583,55,1,organic cation / ergothioneine transporter .  V close to 6584 and IRF1
+SLC22A5,6584,55,0,"organic cation / carnitine transporter, v close to 6583 and IRF1"
+SNX32,254122,65,1,"sorting nexin 32, no idea or likely neighbors"
+SOCS1,8651,66,1,"suppressor of cytokine signaling, induced by stat, inhibits stat"
+STAT1,6772,47,1,"Stat1, activated by cytokines & growth factors -> tx factor.  Next to stat4"
+STAT3,6774,67,1,"Stat3, activated by cytokines & growth factors -> tx factor.  Next to stat 5a & b"
+TLR1,7096,-,1,toll-like receptor forGram+ bugs
+TLR9,54106,-,1,Toll-like receptor #9 (CpG DNA)
+TNF,7124,-,1,Tumor necrosis factor alpha
+TNFRSF14,8764,68,1,"tumor necrosis factor receptor superfamily, member 14"
+TNNI2,7136,69,1,"troponin I type 2 (skeletal, fast).  Next to lymphocyte specific protein which activates neutrophil migration, etc."
+TRAF3IP2,10758,70,1,"TRAF3 interacting protein 2, interact with ikkb or MAP kinase to activate NFKb or Jun"
+TYK2,7297,71,1,"a JAK, next to cdc37 & ICAM3"
+UBAC2,337867,72,1,UBA domain containing 2.  Next to a chemokine receptor and some GPCRs
+UBE2L3,7332,73,1,ubiquitinates NkFB precursor
+ZFP90,146198,74,1,"zinc finger, no idea, no neighbors likely"
+ZNF300P1,134466,75,1,"zinc finger pseudogene, next to immunity-related GTPase family, M (autophagy, CD & tuberculosis susceptibility)"

@@ -1,0 +1,328 @@
+\documentclass{article}
+\usepackage[sc]{mathpazo}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage{url}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\hypersetup{
+ pdfstartview={XYZ null null 1}}
+\usepackage{breakurl}
+\begin{document}
+
+\title{Sources of Variation for Bugs and Genes}
+
+\author{Levi Waldron}
+
+\maketitle
+
+\section{Summary}
+
+We sought to quantify the relative ``impacts'' on the microbiome and
+transcriptome of antibiotics, clinical outcome, inflammation, and
+sample location.  These are not directly comparable as effect sizes
+since antibiotics and tissue location are binary, clinical outcome is
+categorical, and inflammation score is continuous.  Therefore we
+therefore fit a univariate linear model each gene and clade with
+respect to each phenotype variable, and compared the number of
+differentially expressed genes and histogram of nominal p-values.
+
+A higher density of p-values near zero for one of the coefficients
+indicates that more features are differentially expressed or abundant
+with respect to that metadata.
+
+\section{Preliminaries}
+
+<<libraries, cache=FALSE>>=
+library(MASS)
+library(LeviRmisc)
+library(org.Hs.eg.db)
+@
+
+<<assignvars, echo=TRUE, cache.extra=argslist>>=
+print( argslist )  ##show
+for (i in 1:length(argslist))
+    assign(names(argslist)[i], argslist[[i]])  ##assign to memory
+@ %def
+
+<<loaddata, echo=TRUE, cache.extra=tools::md5sum(as.character(argslist))>>=
+all.data <- readPCL(clustering.outfile, number.pheno.rows=0)[[1]]
+gene.data <- all.data[, 1:(match("PC1", colnames(all.data))-1)]
+bug.data <- all.data[, grep("^k__", colnames(all.data))]
+pheno.data <- all.data[, c("ISCORE", "Antibiotics", "Outcome", "Location", "individual")]
+full.gene.data <- t(as.matrix(read.csv(expr.all.outfile, as.is=TRUE, row.names=1)))
+full.gene.data <- full.gene.data[match(rownames(gene.data), rownames(full.gene.data)), ]
+full.bug.data <- read.csv(bugs.all.outfile, as.is=TRUE, row.names=1)
+full.bug.data <- t(full.bug.data)
+full.bug.data <- full.bug.data[match(rownames(pheno.data), rownames(full.bug.data)), ]
+@ 
+
+\section{Data summary}
+
+Note that almost all CP cases take antibiotics; most other cases do not.
+
+<<datasummary>>=
+dim(full.gene.data)
+dim(full.bug.data)
+summary(pheno.data)
+with(pheno.data, table(Antibiotics, Outcome))
+@ 
+
+\section{Methods}
+
+A linear model was fit for each microbial clade and for each
+transcript separately, with respect to antibiotics, outcome,
+inflammation, and tissue location, using the \textit{lm} R function.
+Nominal statistical significance of each feature was assessed by
+analysis of variance F-test of the fit.  For the effect of tissue
+location, all 255 pouch and pre-pouch ilium (PPI) samples were used;
+for antibiotics, inflammation, outcome and the PPI samples from each
+of the 196 individuals were used.  The latter tests were repeated
+using all samples, with a random intercept for individual, using the
+\textit{glmmPQL} function of the \textit{MASS} R package.
+
+Define a function to get F-test p-values for \textbf{simple pairwise
+  tests}: Linear regression for ISCORE, and ANOVA for
+binary/categorical variables.
+
+<<simpleregressionpval>>=
+simpleRegressionPval <- function(dat, pheno, random=NULL, output="pval"){
+    dat.plus.pheno <- cbind(dat, pheno)
+    mat.output <- sapply(1:ncol(dat), function(i){  ##One data column at a time
+        if(is.null(random)){
+            vec.output <- sapply(1:ncol(pheno), function(j){ ##One phenotype column at a time
+                mini.dat <- data.frame(cbind(dat[, i], pheno[, j]))
+                colnames(mini.dat) <- c("y", colnames(pheno)[j])
+                lm.obj <- lm(y ~ ., data=mini.dat)  ##simple lm()
+                if(identical(output, "pval")){
+                    output <- anova(lm.obj)[["Pr(>F)"]][1]
+                }else{
+                    ##return coefficient:
+                    output <- lm.obj$coefficients[2]
+                }
+                return( output )
+            })
+            names(vec.output) <- colnames(pheno)
+        }else{  #random is not null
+            vec.output <- sapply(grep(random, colnames(pheno), invert=TRUE), function(j){
+                mini.dat <- data.frame(cbind(dat[, i], pheno))
+                colnames(mini.dat)[1] <- "y"
+                formulaRandom <- as.formula(paste("y ~ 1|", random, sep=""))
+                formulaFixed <- as.formula(paste("y ~ ", colnames(pheno)[j], sep=""))
+                glm.fit <- try(MASS::glmmPQL(fixed=formulaFixed, random=formulaRandom, family=quasipoisson, data=mini.dat), silent=TRUE)
+                if("try-error" %in% class(glm.fit)){
+                    return( NA )
+                }else{
+                    return(summary(glm.fit)$tTable[2, "p-value"])
+                }
+            })
+            names(vec.output) <- grep(random, colnames(pheno), invert=TRUE, val=TRUE)
+        }
+        return( vec.output )
+    })
+    colnames(mat.output) <- colnames(dat)
+    return(t(mat.output))
+}
+@ 
+
+
+Get simple gene-phenotype associations using lm(), for PPI samples
+only, then add simple lm() p-values for Location using all samples:
+
+<<getpvals.gene.simple, results="hide", message=FALSE, dependson=c("loaddata", "simpleregressionpval")>>=
+stopifnot(all.equal(rownames(gene.data), rownames(pheno.data)))
+gene.pval <- list(
+    PPI=data.frame(simpleRegressionPval(gene.data[pheno.data$Location=="PPI", ], pheno.data[pheno.data$Location=="PPI", -match(c("individual", "Location"), colnames(pheno.data))])),
+    Pouch=data.frame(simpleRegressionPval(gene.data[pheno.data$Location=="Pouch", ], pheno.data[pheno.data$Location=="Pouch", -match(c("individual", "Location"), colnames(pheno.data))])))
+##Add location using all samples
+gene.pval[["PPI"]]$Location <- simpleRegressionPval(gene.data, pheno.data)[, "Location"]
+gene.pval[["Pouch"]]$Location <- gene.pval[["PPI"]]$Location
+@ 
+
+Repeat for all genes:
+<<getallpvals.gene.simple, results="hide", message=FALSE, dependson=c("loaddata", "simpleregressionpval")>>=
+stopifnot(all.equal(rownames(full.gene.data), rownames(pheno.data)))
+full.gene.pval <- list(
+    PPI=data.frame(simpleRegressionPval(full.gene.data[pheno.data$Location=="PPI", ], pheno.data[pheno.data$Location=="PPI", -match(c("individual", "Location"), colnames(pheno.data))])),
+    Pouch=data.frame(simpleRegressionPval(full.gene.data[pheno.data$Location=="Pouch", ], pheno.data[pheno.data$Location=="Pouch", -match(c("individual", "Location"), colnames(pheno.data))])))
+##Add location using all samples
+full.gene.pval[["PPI"]]$Location <- simpleRegressionPval(full.gene.data, pheno.data)[, "Location"]
+full.gene.pval[["Pouch"]]$Location <- full.gene.pval[["PPI"]]$Location
+@ 
+
+And lm coefficients for all genes:
+<<getallcoefs.gene.simple, results="hide", message=FALSE, dependson=c("loaddata", "simpleregressionpval")>>=
+stopifnot(all.equal(rownames(full.gene.data), rownames(pheno.data)))
+full.gene.coef <- list(
+    PPI=data.frame(simpleRegressionPval(full.gene.data[pheno.data$Location=="PPI", ], pheno.data[pheno.data$Location=="PPI", -match(c("individual", "Location"), colnames(pheno.data))], output="coef")),
+    Pouch=data.frame(simpleRegressionPval(full.gene.data[pheno.data$Location=="Pouch", ], pheno.data[pheno.data$Location=="Pouch", -match(c("individual", "Location"), colnames(pheno.data))], output="coef")))
+##Add location using all samples
+full.gene.coef[["PPI"]]$Location <- simpleRegressionPval(full.gene.data, pheno.data, output="coef")[, "Location"]
+full.gene.coef[["Pouch"]]$Location <- full.gene.coef[["PPI"]]$Location
+@ 
+
+And bugs:
+<<getallcoefs.bug.simple, results="hide", message=FALSE, dependson=c("loaddata", "simpleregressionpval")>>=
+stopifnot(all.equal(rownames(full.bug.data), rownames(pheno.data)))
+full.bug.coef <- list(
+    PPI=data.frame(simpleRegressionPval(full.bug.data[pheno.data$Location=="PPI", ], pheno.data[pheno.data$Location=="PPI", -match(c("individual", "Location"), colnames(pheno.data))], output="coef")),
+    Pouch=data.frame(simpleRegressionPval(full.bug.data[pheno.data$Location=="Pouch", ], pheno.data[pheno.data$Location=="Pouch", -match(c("individual", "Location"), colnames(pheno.data))], output="coef")))
+##Add location using all samples
+full.bug.coef[["PPI"]]$Location <- simpleRegressionPval(full.bug.data, pheno.data, output="coef")[, "Location"]
+full.bug.coef[["Pouch"]]$Location <- full.bug.coef[["PPI"]]$Location
+@ 
+
+Same for bugs, first using only the subset selected for association testing:
+<<getpvals.bugs.simple, results="hide", message=FALSE>>=
+stopifnot(all.equal(rownames(bug.data), rownames(pheno.data)))
+bug.pval <- list(
+    PPI=data.frame(simpleRegressionPval(bug.data[pheno.data$Location=="PPI", ], pheno.data[pheno.data$Location=="PPI", -match(c("individual", "Location"), colnames(pheno.data))])),
+    Pouch=data.frame(simpleRegressionPval(bug.data[pheno.data$Location=="Pouch", ], pheno.data[pheno.data$Location=="Pouch", -match(c("individual", "Location"), colnames(pheno.data))])))
+##Add location using all samples
+bug.pval[["PPI"]]$Location <- simpleRegressionPval(bug.data, pheno.data)[, "Location"]  
+bug.pval[["Pouch"]]$Location <- bug.pval[["PPI"]]$Location
+@ 
+
+And for all bugs:
+<<getallpvals.bugs.simple, results="hide", message=FALSE>>=
+stopifnot(all.equal(rownames(full.bug.data), rownames(pheno.data)))
+full.bug.pval <- list(
+    PPI=data.frame(simpleRegressionPval(full.bug.data[pheno.data$Location=="PPI", ], pheno.data[pheno.data$Location=="PPI", -match(c("individual", "Location"), colnames(pheno.data))])),
+    Pouch=data.frame(simpleRegressionPval(full.bug.data[pheno.data$Location=="Pouch", ], pheno.data[pheno.data$Location=="Pouch", -match(c("individual", "Location"), colnames(pheno.data))])))
+##Add location using all samples
+full.bug.pval[["PPI"]]$Location <- simpleRegressionPval(full.bug.data, pheno.data)[, "Location"]
+full.bug.pval[["Pouch"]]$Location <- full.bug.pval[["PPI"]]$Location
+@ 
+
+Mixed effects model with individual as the random effect, using all samples:
+<<getpvals.mixed, results="hide", message=FALSE>>=
+subsample <- FALSE  ##set to TRUE to speed computation with no important difference in results
+set.seed(1)
+if(subsample){
+    genes.sample <- sample(1:ncol(full.gene.data), 500)
+}else{
+    genes.sample <- 1:ncol(full.gene.data)
+}
+full.gene.pval.rand <- simpleRegressionPval(full.gene.data[, genes.sample], pheno.data, random="individual")
+full.bug.pval.rand <- simpleRegressionPval(full.bug.data, pheno.data, random="individual")
+@
+
+\section{Results}
+
+Genes are most associated with location, followed by inflammation,
+with little or no association to outcome.  Microbial clades, on the
+other hand, are strongly associated with antibiotics, less to outcome
+or location, and not with inflammation.
+
+
+<<genesbugshist, eval=FALSE, echo=FALSE, warning=FALSE, dependson=c("getpvals.gene.simple", "getpvals.bugs.simple"), fig.cap="F-test p-values for univariate association between each gene (top) and each metagenomic clade (bottom) with Antibiotics, Outcome, Inflammation and Location.  Under the global null hypothesis of no features associated with the phenotype, a flat line is expected.  For gene expression, inflammation is associated with the greatest number of genes, followed by outcome.  Antibiotics is associated with the greatest number of microbial clades, followed by outcome.">>=
+par(mfrow=c(2, 1), xaxs="i")
+LeviRmisc::multiHist(gene.pval[["PPI"]], lwd=c(3, 1, 1, 1), lty=c(1, 1, 2, 3), breaks=19, xlab="Nominal p-values for genes", main="Simple Association Tests")
+legend("topright", legend=colnames(gene.pval[["PPI"]]), lw=c(3, 1, 1,1), lty=c(1, 1, 2, 3), bty='n')
+LeviRmisc::multiHist(bug.pval[["PPI"]], lwd=c(3, 1, 1, 1), lty=c(1, 1, 2, 3), breaks=19, xlab="Nominal p-values for microbial clades")
+legend("topright", legend=colnames(bug.pval[["PPI"]]), lw=c(3, 1, 1,1), lty=c(1, 1, 2, 3), bty='n')
+@ 
+
+<<fullgenesbugshist, warning=FALSE, echo=FALSE, dependson=c("getallpvals.gene.simple", "getallpvals.bugs.simple"), fig.cap="As with first Figure, but with all genes making the variance filter, and all bugs making the abundance filter.">>=
+par(mfrow=c(2, 2), xaxs="i")
+LeviRmisc::multiHist(full.gene.pval[["PPI"]], lwd=c(3, 1, 1, 1), lty=c(1, 1, 2, 3), breaks=39, xlab="Nominal p-values for genes", main="PPI - genes")
+legend("topright", legend=colnames(full.gene.pval[["PPI"]]), lw=c(3, 1, 1,1), lty=c(1, 1, 2, 3), bty='n')
+LeviRmisc::multiHist(full.bug.pval[["PPI"]], lwd=c(3, 1, 1, 1), lty=c(1, 1, 2, 3), breaks=39, xlab="Nominal p-values for microbial clades", main="PPI - bugs")
+legend("topright", legend=colnames(full.bug.pval[["PPI"]]), lw=c(3, 1, 1,1), lty=c(1, 1, 2, 3), bty='n')
+##Pouch
+LeviRmisc::multiHist(full.gene.pval[["Pouch"]], lwd=c(3, 1, 1, 1), lty=c(1, 1, 2, 3), breaks=39, xlab="Nominal p-values for genes", main="Pouch - genes")
+legend("topright", legend=colnames(full.gene.pval[["Pouch"]]), lw=c(3, 1, 1,1), lty=c(1, 1, 2, 3), bty='n')
+LeviRmisc::multiHist(full.bug.pval[["Pouch"]], lwd=c(3, 1, 1, 1), lty=c(1, 1, 2, 3), breaks=39, xlab="Nominal p-values for microbial clades", main="Pouch - bugs")
+legend("topright", legend=colnames(full.bug.pval[["Pouch"]]), lw=c(3, 1, 1,1), lty=c(1, 1, 2, 3), bty='n')
+@
+
+
+<<randomeffect_genesbugshist, warning=FALSE, echo=FALSE, eval=FALSE, fig.cap="As with first Figure, but with random effect of individual.">>=
+par(mfrow=c(2, 1))
+LeviRmisc::multiHist(full.gene.pval.rand, lwd=c(3, 1, 1, 1), lty=c(1, 1, 2, 3), breaks=39, xlab="Nominal p-values for genes", main="Simple Association Tests (Random Effect of Individual)")
+legend("topright", legend=colnames(full.gene.pval.rand), lw=c(3, 1, 1,1), lty=c(1, 1, 2, 3), bty='n')
+LeviRmisc::multiHist(full.bug.pval.rand, lwd=c(3, 1, 1, 1), lty=c(1, 1, 2, 3), breaks=39, xlab="Nominal p-values for microbial clades")
+legend("topright", legend=colnames(full.bug.pval.rand), lw=c(3, 1, 1,1), lty=c(1, 1, 2, 3), bty='n')
+@ 
+
+Differentially expressed genes using simple lm.  Note, I
+double-checked the correctness of the identical results for bug /
+outcome in PPI and Pouch, both correspond to exactly 4 DE bugs out of
+129.
+
+<<full_gene_fdrtable, dependson=c("getallpvals.gene.simple", "getallpvals.bug.simple")>>=
+fdr.cutoff <- 0.05
+bugs.de <- list()
+genes.de <- list()
+summary.de <- list()
+for (i in 1:length(full.gene.pval)){
+    iName <- names(full.gene.pval)[i]
+    genes.de[[ iName ]] <- sapply(data.frame(full.gene.pval[[ iName ]]), function(x)
+                                sum(adjP(x)[, 2] < fdr.cutoff) / length(x))
+    bugs.de[[ iName ]] <- sapply(data.frame(full.bug.pval[[ iName ]]), function(x)
+                               sum(adjP(x)[, 2] < fdr.cutoff) / length(x))
+    summary.de[[ iName ]] <- data.frame("Genes (%)"=genes.de[[ iName ]], "Microbial Clades (%)"=bugs.de[[ iName ]], check.names=FALSE)
+    summary.de[[ iName ]] <- round(summary.de[[ iName ]] * 100)
+}
+bugs.de
+genes.de
+summary.de
+@ 
+
+<<genescatter, dependson="getallcoefs.gene.simple", fig.cap="Genes PPI vs Pouch scatterplot">>=
+par(mfrow=c(2, 2))
+for (i in 1:ncol(full.gene.coef[["PPI"]]))
+    plot(full.gene.coef[["PPI"]][, i], full.gene.coef[["Pouch"]][, i], xlab="PPI", ylab="Pouch", main=colnames(full.gene.coef[["PPI"]])[i], pch=".")
+@ 
+
+<<bugscatter, dependson="getallcoefs.bug.simple", fig.cap="Bugs PPI vs Pouch scatterplot">>=
+par(mfrow=c(2, 2))
+for (i in 1:ncol(full.bug.coef[["PPI"]]))
+    plot(full.bug.coef[["PPI"]][, i], full.bug.coef[["Pouch"]][, i], xlab="PPI", ylab="Pouch", main=colnames(full.bug.coef[["PPI"]])[i], pch=".")
+@ 
+
+Differentially expressed genes using random intercept of individual and all samples:
+<<full_gene_rand_fdrtable, dependson=c("randomeffect_genesbugshist")>>=
+genes.de.rand <- sapply(data.frame(full.gene.pval.rand), function(x)
+                   sum(adjP(na.omit(x))[, 2] < fdr.cutoff) / length(na.omit(x)))
+bugs.de.rand <- sapply(data.frame(full.bug.pval.rand), function(x)
+                   sum(adjP(na.omit(x))[, 2] < fdr.cutoff) / length(na.omit(x)))
+summary.de.rand <- data.frame("Genes (%)"=genes.de.rand, "Microbial Clades (%)"=bugs.de.rand, check.names=FALSE)
+summary.de.rand <- round(summary.de.rand * 100)
+genes.de.rand
+bugs.de.rand
+summary.de.rand
+@ 
+
+<<writefile>>=
+##MASS breaks select() S4 from AnnotationDbi:
+unloadNamespace(c("pensim", "multtest", "ggplot2", "car", "MASS"))  
+for (x in names(full.bug.pval)){
+    fname <- paste(output.dir, "/full.bug.pval_", x, ".csv", sep="")
+    write.csv(full.bug.pval[[x]], fname)
+}
+for (x in names(full.gene.pval)){
+    output <- full.gene.pval[[x]]
+    output$SYMBOL <- select(org.Hs.eg.db, keys=rownames(output), columns="SYMBOL")[, 2]
+    fname <- paste(output.dir, "/full.gene.pval_", x, ".csv", sep="")
+    write.csv(output, fname)
+}
+fname <- paste(output.dir, "/full.bug.pval.rand.csv", sep="")
+write.csv(full.bug.pval.rand, fname)
+fname <- paste(output.dir, "/full.gene.pval.rand.csv", sep="")
+output <- data.frame(full.gene.pval.rand)
+output$SYMBOL <- select(org.Hs.eg.db, keys=rownames(output), columns="SYMBOL")[, 2]
+write.csv(output, fname)
+@ 
+
+\newpage
+\subsection{Session Info}
+<<sessioninfo>>=
+sessionInfo()
+@
+
+\end{document}

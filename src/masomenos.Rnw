@@ -1,0 +1,292 @@
+\documentclass{article}
+\usepackage[sc]{mathpazo}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage{url}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\hypersetup{
+ pdfstartview={XYZ null null 1}}
+\usepackage{breakurl}
+\begin{document}
+
+\title{Mas-o-menos prediction}
+
+\author{Levi Waldron}
+
+\maketitle
+
+\section{Summary}
+
+Here we implement the simple ``mas-o-menos'' method in caret
+(http://biostats.bepress.com/harvardbiostat/paper158/), test the
+implementation on a small simulation, then apply it to predicting
+outcome in the pouchitis data.  I am out of time trying to get the
+multiclass predictions working, so will do that with the LDA package
+in another document.
+
+\section{Input arguments}
+
+<<echo=TRUE>>=
+print( argslist )  ##show
+for (i in 1:length(argslist))
+    assign(names(argslist)[i], argslist[[i]])  ##assign to memory
+@ %def
+
+
+<<loaddata>>=
+library(LeviRmisc)
+all.data <- readPCL(clustering.outfile, number.pheno.rows=0)[[1]]
+outcome.column <- match("Outcome", colnames(all.data))
+gene.data <- all.data[, c(outcome.column, 1:(match("PC1", colnames(all.data))-1))]
+bug.data <- all.data[, c(outcome.column, grep("^k__", colnames(all.data)))]
+mod.data <- all.data[, c(outcome.column, grep("M00", colnames(all.data)))]
+@
+
+\section{Defining mas-o-menos as a custom model for caret}
+
+See http://caret.r-forge.r-project.org/‎ for information on the caret
+package.  First define masomenosFunc for training a model:
+<<masomenosFunc>>=
+masomenosFunc <- function(data, parameter, last, levels, ...){ 
+    ## data: a data frame of the training set data. The outcome will be
+    ## in a column labeled .outcome. If case weights were specified in the
+    ## train call, these are in the column .modelWeights. If the formula
+    ## method for train was invoked, the data passed into this function
+    ## will have been processed (i.e. dummy variables have been created
+    ## etc).
+    ##
+    ## parameter: a single row data frame with the current tuning parameter
+    ##
+    ## last: a logical vector for the final model fit with the selected
+    ## tuning parameters and the full training set
+    ## 
+    ## levels: levels of the data$.outcome variable
+    ## 
+    ## ... arguments passed form train to this function
+    ##
+    ## only one tuning parameter, the number of non-zero coefficients.
+    ## 
+    if(!is.null(parameter$.fracnonzero)){
+        n.nonzero <- max(1, floor(parameter$.fracnonzero * length(grep("^\\.", colnames(data), invert=TRUE))))
+    }else{  ##use parameter$.nonzero directly
+        n.nonzero <- parameter$.nonzero
+    }
+    weights <- data$.weights  ##not being used.
+    response <- data$.outcome
+    if(class(response) == "character")
+        response <- factor(response)
+    if(class(response) == "numeric")
+        stop("Numeric outcome not yet supported")
+    ##Drop any columns starting with a "." for use in training:
+    data <- data[, grep("^\\.", colnames(data), invert=TRUE)]
+    ## Optional scaling and centering
+    opt.args <- list(...)
+    if(is.null(opt.args$scaling))
+        opt.args$scaling <- FALSE
+    if(is.null(opt.args$centering))
+        opt.args$centering <- FALSE
+    data <- scale(data, center=opt.args$centering, scale=opt.args$scaling)
+    if(is.null(attr(data, "scaled:scale"))){
+        scales <- rep(1, ncol(data))
+        names(scales) <- colnames(data)
+    }else{
+        scales <- attr(data, "scaled:scale")
+    }
+    if(is.null(attr(data, "scaled:center"))){
+        centers <- rep(0, ncol(data))
+        names(centers) <- colnames(data)
+    }else{
+        centers <- attr(data, "scaled:center")
+    }
+    if(class(response) == "factor"){
+        if(is.na(n.nonzero))
+            stop("trainFunc was called with NA tuning parameter")
+        if(n.nonzero > 0){
+            library(genefilter)
+            tstat <- rowttests(x=t(data), fac=response, tstatOnly=TRUE)
+            ##substitute NA values with zero, so these variables do not get selected:
+            tstat$statistic[is.na(tstat$statistic)] <- 0
+            keep.cc <- order(abs(tstat$statistic), decreasing=TRUE)[1:n.nonzero]
+            keep.cc <- (1:nrow(tstat)) %in% keep.cc
+            ## if compound.covariate=TRUE is passed through the ..., 
+            ## use actual t-statistic instead of signs.
+            if(identical(opt.args$compound.covariate, TRUE)){
+                cc <- tstat$statistic
+            }else{
+                cc <- sign(tstat$statistic)
+            }
+            cc[!keep.cc] <- 0
+            cc <- cc / sum(abs(cc))
+            names(cc) <- rownames(tstat)
+        }else{
+            cc <- rep(0, ncol(data))
+            names(cc) <- colnames(data)
+        }
+        preds <- (data %*% cc)[, 1]
+        ## Determine threshold, see Radamacher et. al. JCB 9(3):2002, 
+        ## "A Paradigm for Class Prediction Using Gene Expression Profiles".  
+        ## If prediction is greater than Ct, predict levels[1], 
+        ## otherwise predict levels[2].
+        C1 <- mean(preds[response == levels[1]])
+        C2 <- mean(preds[response == levels[2]])
+        Ct <- (C1+C2) / 2
+        return( list(fit=list(coefs=cc, threshold=Ct, scales=scales, centers=centers, 
+                     levels=levels, 
+                     higherlevel=which.max(c(C1, C2)),
+                     lowerlevel=which.min(c(C1, C2)))) )
+    }
+}
+@ 
+
+Define the prediction function:
+<<masomenosPredFunc>>=
+masomenosPredFunc <- function(object, newdata){
+    data <- sweep(as.matrix(newdata), 2, object$fit$centers, "-")
+    data <- sweep(data, 2, object$fit$scales, "/")
+    preds <- (data %*% object$fit$coefs)[, 1]
+    if(!is.null(object$fit$threshold))
+        preds <- ifelse(preds > object$fit$threshold, 
+                        object$fit$levels[object$fit$higherlevel], object$fit$levels[object$fit$lowerlevel])
+    return(preds)
+}
+@ 
+
+masomenosSortFunc is for sorting models by complexity - smaller values of the
+tuning parameter (number of non-zero coefficients) are lower
+complexity than larger values:
+<<masomenosSortFunc>>=
+masomenosSortFunc <- function(x){
+    x[order(x[, 1]), ]
+}
+@ 
+
+Generates the dataframe of tuning parameters given training data and
+the number of tuning parameters desired (len).
+<<masomenosParamFunc>>=
+masomenosParamFunc <- function(data, len){
+    n.var <- length(grep("^\\.", colnames(data), invert=TRUE))
+    return( data.frame(.nonzero=floor(seq(from=1, to=n.var, length.out=len))) )
+}
+@ 
+
+\section{Mimi-simulation}
+
+\subsection{Binary Example}
+Here is a mini-simulation to show that the method is working, using
+pensim to simulate correlated data with 15 variables in three
+correlated blocks of five variables, with 500 samples, binary labels A
+and B.  One variable block is positively associated with A, another
+negatively associated, and another zero association.  This is an
+``easy'' classification problem.
+
+Simulate the data:
+<<pensim>>=
+library(pensim)
+set.seed(3)
+mydata <- create.data(nvars=c(5, 5, 5), cors=c(0.5, 0.5, 0.5),
+                      associations=c(0,5,-5),firstonly=c(FALSE, FALSE, FALSE), 
+                      nsamples=500, response="binary", logisticintercept=0.5)$data
+rownames(mydata) <- make.names(rownames(mydata))
+mydata$outcome <- factor(LETTERS[mydata$outcome])
+@ 
+
+Train using caret - check every possible number of nonzero variables
+in tuning, tune by 3-fold cross-validation with 3 repeats.  
+<<caretprep>>=
+library(caret)
+ctrl <- trainControl(custom = list(
+                      parameters = masomenosParamFunc, 
+                      model = masomenosFunc, 
+                      prediction = masomenosPredFunc,  
+                      sort = masomenosSortFunc, 
+                      probability = NULL, 
+                      method = "repeatedcv", number=3, repeats = 3))
+custom.out <- train(outcome ~ ., data = mydata, method = "custom", trControl = ctrl, tuneLength=15)
+@ 
+
+There should be 5 zero coefficients, five negative, and five positive.
+<<careteval, fig.cap="Accuracy vs. number of non-zero coefficients, showing the correct optimum at 10.">>=
+custom.out$finalModel$fit$coefs
+plot(custom.out)
+@
+
+And resubstitution predictions should be very accurate:
+<<caretresub>>=
+table(mydata$outcome, masomenosPredFunc(object=custom.out$finalModel, newdata=mydata[, 1:(ncol(mydata)-1)]))
+@
+
+%% \subsection{Multinomial Example}
+
+%% Use the same predictors as in the previous example, but create a
+%% three-level response variable, which is simply A, B, or C, whichever
+%% of the a, b, and c groups of X variables has the highest mean:
+%% <<multinomdata>>=
+%% multiX <- mydata[, -match("outcome", colnames(mydata))]
+%% classmeans <- sapply(c("a", "b", "c"), function(x) rowMeans(multiX[, grep(x, colnames(multiX))]))
+%% multiX$outcome <- factor( LETTERS[apply(classmeans, 1, which.max)] )
+
+%% library(MASS)
+%% fit <- lda(outcome ~ ., data=multiX)
+%% predict(object=fit, newdata=multiX[, 1:15])
+%% table(multiX$class, fit$class)
+%% @ 
+
+%% <<multicaretprep>>=
+%% comparisons <- lapply(2:length(levels(multiX$outcome)), function(i) c(1, i))
+%% names(comparisons) <- levels(multiX$outcome)[-1]
+      
+%% custom.out2 <- lapply(comparisons, function(x){
+%%     subdata <- multiX[multiX$outcome %in% levels(multiX$outcome)[x], ]
+%%     subdata$outcome <- factor(subdata$outcome)
+%%     output <- train(outcome ~ ., data=subdata, method = "custom", trControl = tctrl, tuneLength=15)
+%%     output$finalModel$fit$threshold <- NULL
+%%     return(output)
+%% })
+%% tmp <- cbind(0, sapply(custom.out2, function(x) masomenosPredFunc(object=x$finalModel, newdata=multiX[, -16])))
+%% preds <- levels(multiX$outcome)[apply(tmp, 1, which.max)]
+    
+%% @ 
+
+
+\section{Prediction models for pouchitis}
+
+Define the caret control object for training a model.  Here I use the
+tuning parameter .fracnonzero, which is the fraction of coefficients
+that are non-zero, and explore a sequence between 0 and 1.
+<<ctrl>>=
+grid <- data.frame(.fracnonzero=seq(from=0, to=1, length.out=20))
+ctrl <- trainControl(custom = list(parameters = masomenosParamFunc,
+                     model = masomenosFunc,
+                     prediction = masomenosPredFunc,
+                     probability = NULL,
+                     sort = masomenosSortFunc),
+                     method = "repeatedcv",
+                     number=10,  #10-fold CV
+                     repeats = 1)  #repeated 3 time1
+@ 
+
+<<genemodel>>=
+gene.models <- lapply(as.character(unique(gene.data$Outcome)), function(single.outcome){
+    dat <- gene.data
+    dat$Outcome <- factor(ifelse(gene.data$Outcome == single.outcome, single.outcome, paste("non", single.outcome, sep="_")))
+    train(Outcome ~ ., data=dat, method="custom", trControl=ctrl, scaling=TRUE, centering=TRUE, tuneLength=15)
+})
+names(gene.models) <- as.character(unique(gene.data$Outcome))
+par(mfrow=c(3, 2))
+for (i in 1:length(gene.models))
+    boxplot(as.matrix(gene.data[, -1]) %*% gene.models[[i]]$finalModel$fit$coefs ~ gene.data[, 1], main=names(gene.models)[i])
+gene.models[[1]]$finalModel$fit$coefs[gene.models[[1]]$finalModel$fit$coefs != 0.0]
+@ 
+
+\newpage
+\subsection{Session Info}
+<<sessioninfo>>=
+sessionInfo()
+@
+
+\end{document}

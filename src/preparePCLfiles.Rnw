@@ -1,0 +1,334 @@
+\documentclass{article}
+\usepackage[sc]{mathpazo}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage{url}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\hypersetup{
+ pdfstartview={XYZ null null 1}}
+\usepackage{breakurl}
+\begin{document}
+
+\title{Preparation of PCL files}
+
+\author{Levi Waldron}
+
+\maketitle
+
+\section{Summary}
+This script loads microbiome, gene expression, and phenotype data,
+does feature selection and processing for microbiome, and writes PCL
+files.  It also performs PCA on the microbiome data, and makes plots
+of the microbiome data (Figure \ref{fig:bugheatmap}) and of the PCA
+loadings for the microbiome (Figure \ref{fig:bugPCAheatmap}).  These
+PCL files are used as input for Maaslin.
+
+\section{Methods}
+Microbial clades without at least three counts in at least three
+samples were removed, synthetic clades were added, and counts were
+converted to relative abundance, using the scriptManipulateTable.py
+script of the Breadcrumbs library.  A stringent presence filter was
+applied, requiring at least a mean of 0.005 and max of 0.05.  Clades
+labelled as ``Unclassified'' or missing genes or higher-level names
+were removed.
+
+\section{Input arguments}
+
+<<echo=TRUE>>=
+print( argslist )  ##show
+for (i in 1:length(argslist))
+    assign(names(argslist)[i], argslist[[i]])  ##assign to memory
+@ %def
+
+Load expression data and gene PCA data created by PCA.Rnw:
+<<loaddata, echo=TRUE>>=
+scores <- read.csv(scores.outfile, row.names=1, check.names=FALSE)
+full.expr.dat <- read.delim(expression.infile, as.is=TRUE, row.names=1, check.names=FALSE)
+rep.genes <- read.delim(repgenes.infile, as.is=TRUE)
+##
+expr.dat <- full.expr.dat[match(rep.genes$EntrezID, rownames(full.expr.dat)), ]
+expr.dat <- t(expr.dat)
+if( identical(as.integer(colnames(expr.dat)), rep.genes$EntrezID) )
+    colnames(expr.dat) <- rep.genes$New_Medoid
+##
+expr.dat <- expr.dat[rownames(expr.dat) %in% rownames(scores), ]
+scores <- scores[na.omit(match(rownames(expr.dat), rownames(scores))), ]
+##
+if( identical(rownames(scores), rownames(expr.dat)) ){
+    expr.dat.final <- cbind(expr.dat, scores)
+}else{
+    stop("Could not match rownames(scores) with rownames(expr.dat)")
+}
+@
+
+Also process Boyko's "gene expression metadata gold.txt"
+<<loadmetadata, echo=TRUE>>=
+gold <- read.delim(metadata.infile, as.is=TRUE)
+gold$individual <- paste(gold$ID_1, gold$ID_2, sep="-")
+gold$OutcomeFAP <- ifelse(gold$Outcome == "FAP", "FAP", "nonFAP")
+gold <- gold[match(rownames(expr.dat.final), gold$Chip), ]
+rownames(gold) <- gold$Chip
+if(identical(all.equal(rownames(gold), rownames(expr.dat.final)), TRUE)){
+    if(keepPPIonly){
+        gene.meta.dat <- cbind(expr.dat.final, gold[, c("ISCORE", "Antibiotics", "Outcome", "OutcomeFAP", "Location")])
+    }else{
+        gene.meta.dat <- cbind(expr.dat.final, gold[, c("ISCORE", "Antibiotics", "Outcome", "OutcomeFAP", "Location", "individual")])
+    }
+    rownames(gene.meta.dat) <- gold$MID
+}
+colnames(gene.meta.dat) <- make.names(colnames(gene.meta.dat))  #converts - to . in HLA-E and HLA-DRB5
+##
+if(identical(all.equal(rownames(gold), colnames(full.expr.dat)), TRUE)){
+    colnames(full.expr.dat) <- gold$MID
+}else{
+    stop("Could not match up rownames(gold) with colnames(full.expr.dat)")
+}
+write.csv(full.expr.dat, file=expr.all.outfile)
+@
+
+\section{Preprocessing of microbiome data}
+I will show details on the processing of the microbiome data.  First
+unzip the Qiime file:
+<<UnzipQiime>>=
+system(paste("zcat ../input/otu_table.txt.gz > ", output.dir, "/otu_table.qiime", sep=""))
+@
+
+Convert to Maaslin PCL file, with | instead of ;
+<<qiime2otus>>=
+system(paste("./qiime2otus.py ", output.dir, "/otu_table.qiime ", output.dir, "/otu_table.otu", sep=""))
+@
+
+Add hierarchical sums (synthetic clades, remove features with at
+least a 3-count in at least 3 samples, and normalize to relative
+abundance, then read this into R:
+<<scriptmanipulatetable>>=
+system(paste("./scriptManipulateTable.py -i '#OTU ID' -l '#OTU ID' -s -n -O 3,3 ", output.dir, "/otu_table.otu", sep=""))
+rel.abd <- read.table(rel.abd.infile, header=TRUE, check.names=FALSE, skip=1, comment.char="", sep="\t", row.names=1)
+dim(rel.abd)
+@
+
+Require at least a mean of 0.005 and max of 0.05, then remove
+k\_\_Bacteria, which is always 1.  Finally, limit metadata to samples
+with microbiome data:
+
+<<filterotus>>=
+rel.abd <- rel.abd[apply(rel.abd, 1, funcBugFilt), ]
+dim(rel.abd)
+write.csv(asin(sqrt(rel.abd)), file=bugs.all.outfile)
+if("k__Bacteria" %in% rownames(rel.abd) ) rel.abd <- rel.abd[-match("k__Bacteria", rownames(rel.abd)), ]
+dim(gene.meta.dat)
+gene.meta.dat <- gene.meta.dat[rownames(gene.meta.dat) %in% colnames(rel.abd), ]
+dim(gene.meta.dat)
+@
+
+Load module abundances from Picrust output:
+
+<<picrust>>=
+mod.abd <- read.table(mod.abd.infile, comment.char="", row.names=1, sep="\t", header=TRUE)
+dim(mod.abd)
+mod.abd <- mod.abd[apply(mod.abd, 1, function(x) sum(x > 0) >=3), ]  ##presence in at least 3 samples
+dim(mod.abd)
+mod.abd <- mod.abd[, match(colnames(rel.abd), colnames(mod.abd))]
+dim(mod.abd)
+stopifnot(identical(all.equal(colnames(mod.abd), colnames(rel.abd)), TRUE))
+mod.abd <- mod.abd[, match(rownames(gene.meta.dat), colnames(mod.abd))]
+dim(mod.abd)
+stopifnot(identical(all.equal(rownames(gene.meta.dat), colnames(mod.abd)), TRUE))
+@
+
+\section{PCA of bug data}
+
+Ordinary PCA for now, keeping the number of components to account for
+``prop.var.explained'' proportion of the variance:
+
+<<bugpca, fig.cap="Principal Components Analysis scores for PC1 and PC2 in bug data.  The horseshoe effect is noticeable but not extreme.">>=
+prcomp.dat <- t(LeviRmisc::cladeFilter(rel.abd, min.samp=0, asinsqrt=TRUE, remove.unclassified=FALSE, remove.unnamed.genus.or.higher=FALSE, required.level=""))
+rel.abd.prcomp <- prcomp(prcomp.dat, scale.=TRUE)
+rel.abd.scores <- t(rel.abd.prcomp$x[, cumsum(rel.abd.prcomp$sdev^2 / sum(rel.abd.prcomp$sdev^2)) < prop.var.explained])
+rel.abd.scores <- rel.abd.scores[, match(rownames(gene.meta.dat), colnames(rel.abd.scores))]
+rownames(rel.abd.scores) <- paste("bug_", rownames(rel.abd.scores), sep="")
+dim(rel.abd.scores)
+plot(t(rel.abd.scores[1:2, ]))
+@
+
+\section{Write the PCL files}
+This section shows three alternative methods of feature selection for
+the microbiome data, and creates both continuous and discretized
+microbial data.
+
+\subsection{Terminal nodes only}
+Keep terminal nodes of the tree only.
+
+<<terminalonly>>=
+rel.abd.cont <- LeviRmisc::cladeFilter(rel.abd, terminal.nodes.only=TRUE, asinsqrt=TRUE, min.abd=1e-4, min.samp=0.1)
+rel.abd.disc <- LeviRmisc::cladeFilter(rel.abd, terminal.nodes.only=TRUE, asinsqrt=FALSE, min.abd=1e-4, min.samp=0.1, discretize.cutpoints=discretize.cutpoints, discretize.labels=discretize.labels)
+dim(rel.abd.cont)
+dim(rel.abd.disc)
+##
+rel.abd.cont <- rel.abd.cont[, match(rownames(gene.meta.dat), colnames(rel.abd.cont))]
+rel.abd.disc <- rel.abd.disc[, match(rownames(gene.meta.dat), colnames(rel.abd.disc))]
+rownames( rel.abd.disc ) <- make.names(paste("disc_", rownames( rel.abd.disc ), sep=""))
+dim(rel.abd.cont)
+dim(rel.abd.disc)
+rel.abd.flt <- rbind(rel.abd.cont, rel.abd.disc, mod.abd, rel.abd.scores)
+##
+if( identical(rownames(gene.meta.dat), colnames(rel.abd.flt)) )
+    all.dat <- cbind(gene.meta.dat, data.frame(t(rel.abd.flt), check.names=FALSE))
+all.dat <- all.dat[order(rownames(all.dat)), ]
+##
+writePCL(all.dat, file=terminal.outfile)
+dim(all.dat)
+@
+
+\subsection{Genus or Family Only}
+
+Keep genus level only, unless this is not available, then keep family level.
+
+<<genusonly>>=
+rel.abd.cont <- LeviRmisc::cladeFilter(rel.abd, genus.or.family.only=TRUE, asinsqrt=TRUE, min.abd=1e-4, min.samp=0.1)
+rel.abd.disc <- LeviRmisc::cladeFilter(rel.abd, genus.or.family.only=TRUE, asinsqrt=FALSE, min.abd=1e-4, min.samp=0.1, discretize.cutpoints=discretize.cutpoints, discretize.labels=discretize.labels)
+dim(rel.abd.cont)
+dim(rel.abd.disc)
+##
+rel.abd.cont <- rel.abd.cont[, match(rownames(gene.meta.dat), colnames(rel.abd.cont))]
+rel.abd.disc <- rel.abd.disc[, match(rownames(gene.meta.dat), colnames(rel.abd.disc))]
+rownames( rel.abd.disc ) <- make.names(paste("disc_", rownames( rel.abd.disc ), sep=""))
+rel.abd.flt <- rbind(rel.abd.cont, rel.abd.disc, mod.abd, rel.abd.scores)
+dim(rel.abd.cont)
+dim(rel.abd.disc)
+##
+if( identical(rownames(gene.meta.dat), colnames(rel.abd.flt)) )
+    all.dat <- cbind(gene.meta.dat, data.frame(t(rel.abd.flt), check.names=FALSE))
+all.dat <- all.dat[order(rownames(all.dat)), ]
+##
+writePCL(all.dat, file=genus.outfile)
+dim(all.dat)
+@
+
+\subsection{Clustering for dimension reduction}
+
+Do hierarchical clustering, and select the representative with minimum
+mean from each cluster.
+
+<<clusteringselection>>=
+FUN <- function(x) -mean(x)
+rel.abd.cont <- LeviRmisc::cladeFilter(rel.abd, clustering.reduction=TRUE, cutree.options=set.cutree.options,
+                            asinsqrt=TRUE, min.abd=1e-4, min.samp=0.1, clusterSelectFun=FUN)
+rel.abd.disc <- LeviRmisc::cladeFilter(rel.abd, clustering.reduction=TRUE, cutree.options=set.cutree.options,
+                            asinsqrt=FALSE, min.abd=1e-4, min.samp=0.1, clusterSelectFun=FUN,
+                            discretize.cutpoints=discretize.cutpoints,
+                            discretize.labels=discretize.labels)
+dim(rel.abd.cont)
+dim(rel.abd.disc)
+##
+rel.abd.cont <- rel.abd.cont[, match(rownames(gene.meta.dat), colnames(rel.abd.cont))]
+rel.abd.disc <- rel.abd.disc[, match(rownames(gene.meta.dat), colnames(rel.abd.disc))]
+rownames( rel.abd.disc ) <- make.names(paste("disc_", rownames( rel.abd.disc ), sep=""))
+rel.abd.flt <- rbind(rel.abd.cont, rel.abd.disc, mod.abd, rel.abd.scores)
+dim(rel.abd.cont)
+dim(rel.abd.disc)
+##
+if( identical(rownames(gene.meta.dat), colnames(rel.abd.flt)) )
+    all.dat <- cbind(gene.meta.dat, data.frame(t(rel.abd.flt), check.names=FALSE))
+all.dat <- all.dat[order(rownames(all.dat)), ]
+##
+writePCL(all.dat, file=clustering.outfile)
+dim(all.dat)
+@
+
+\section{plots}
+
+Plots of the bug data and PCA.  This next chunk creates a more
+complete microbiome data matrix for plotting, only removing
+unclassified bugs, not doing arcsin sqrt transformation for plotting.
+
+<<echo=FALSE>>=
+rel.abd.disc.plt <- rel.abd.disc[order(sapply(strsplit(rownames(rel.abd.disc), split="\\|"),
+                                              length), rownames(rel.abd.disc)), ]
+rel.abd.plt <- as.matrix(rel.abd)
+@
+
+<<bugheatmap, echo=FALSE, warning=FALSE, fig.cap="Bug abundance, discretized at 1e-4, 0.01, 0.25 relative abundance.  Row side bar indicates features selected by the clustering method for association testing in the gene vs. bug all-against-all comparison.  Horizontal lines are drawn every three features to enhance readability.  Features are clustered by 1-Pearson Correlation.">>=
+row.cols <- ifelse(rownames(rel.abd.plt) %in% rownames(rel.abd.flt), "black", "white")
+library(gplots)
+heatmap.2(rel.abd.plt,
+          main="discretized data",
+          distfun=function(c) as.dist(1-cor(t(c))),
+          cexRow=0.6,
+          breaks=c(0, 1e-4, 0.01, 0.25, 1),
+          scale="none",
+          trace='none',
+          key=FALSE,
+          rowsep=seq(2, nrow(rel.abd.plt), by=3), sepcolor="cyan",
+          labCol=rep("", ncol(rel.abd.plt)),
+          margins=c(5, 10),
+          labRow=shortenCladeName(rownames(rel.abd.plt)),
+          col=colorRampPalette(c("white", "black"))(4),
+          RowSideColors=row.cols)
+##
+@
+
+<<bugPCAheatmap, echo=FALSE, warning=FALSE, fig.cap="PCA loadings for bug features.">>=
+div.palette <- colorRampPalette(c("#0072B2", "white", "#E69F00"))(100)
+pcnames <- paste(colnames(rel.abd.prcomp$x), " (", round(rel.abd.prcomp$sdev^2 / sum(rel.abd.prcomp$sdev^2), 2) * 100, "%)", sep="")
+for (n.rows in c(6, 8, 25)){
+    loadings.plt <- as.matrix(rel.abd.prcomp$rotation[, 1:nrow(rel.abd.scores)])
+    loadings.plt <- loadings.plt[unique(as.integer(apply(loadings.plt, 2, function(x) which(rank(-abs(x)) <= n.rows)))), ]
+    heatmap.2(loadings.plt,
+              labRow=shortenCladeName(rownames(loadings.plt)),
+              dendrogram="row",
+              labCol=pcnames[1:nrow(rel.abd.scores)], Colv=NULL,
+              col=div.palette, cexRow=0.2 + 0.5/log10(nrow(rel.abd.prcomp$rotation)),
+              tracecol="black",
+              breaks=seq(-max(abs(range(loadings.plt))), max(abs(range(loadings.plt))), length.out=101),
+              scale='none', margins=c(6, 10))
+}
+write.csv(loadings.plt, file=paste(dirname(bugs.all.outfile), "/bugs_top25_loadings.csv", sep=""))
+@
+
+<<genemap>>=
+loadings.genes <- read.csv(gene.loadings.infile, as.is=TRUE, row.names=1, check.names=FALSE)
+library(biomaRt)
+ensembl<- useMart("ensembl", dataset="hsapiens_gene_ensembl")
+entrez.ids <- rownames(loadings.genes)
+genes <- getBM(attributes = c("entrezgene", "hgnc_symbol"),
+               mart=ensembl, filter="entrezgene", values=entrez.ids)
+genemap <- sapply(entrez.ids, function(x) genes[na.omit(match(x, genes[, 1]))[1], 2])
+genemap <- data.frame(entrez=names(genemap), hgnc=genemap, stringsAsFactors=FALSE)
+genemap$hgnc[is.na(genemap$hgnc)] <- genemap$entrez[is.na(genemap$hgnc)]
+rownames(loadings.genes) <- make.names(genemap$hgnc, unique=TRUE)
+@
+
+<<genePCAheatmap, echo=FALSE, warning=FALSE, fig.cap="PCA loadings for genes.">>=
+for (n.loadings in c(6, 8, 25)){
+    div.palette <- colorRampPalette(c("#0072B2", "white", "#E69F00"))(100)
+    show.these.genes <- do.call(c, lapply(loadings.genes, function(x){
+        select.genes <- which(rank(-abs(x)) <= n.loadings)
+        select.genes <- select.genes[order(x[select.genes])]
+        select.genes
+    }))
+    loadings.genes.show <- loadings.genes[show.these.genes, ]
+    loadings.genes.show <- as.matrix(loadings.genes.show)
+    scalefac <- ifelse(n.loadings==25, 0.2, 0.5)
+    heatmap.2(loadings.genes.show,
+              Colv=FALSE, Rowv=FALSE,
+              col=div.palette, cexRow=0.1 + scalefac/log10(nrow(loadings.genes.show)), tracecol="black",
+              breaks=seq(-max(abs(range(loadings.genes.show))), max(abs(range(loadings.genes.show))), length.out=101),
+              scale='none', margins=c(6, 10))
+}
+write.csv(loadings.genes.show, file=paste(dirname(bugs.all.outfile), "/genes_top25_loadings.csv", sep=""))
+@
+
+
+\newpage
+\subsection{Session Info}
+<<sessioninfo>>=
+sessionInfo()
+@
+
+\end{document}

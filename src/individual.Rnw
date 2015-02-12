@@ -1,0 +1,139 @@
+\documentclass{article}
+\usepackage[sc]{mathpazo}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage{url}
+\usepackage{breakurl}
+\begin{document}
+
+\title{Impact of individual on gene expression and bug abundance profiles}
+
+\author{Levi Waldron}
+
+\maketitle
+
+The basic idea here is to look at the individuals with two samples, to see
+whether gene expression and bug data are more similar within
+individuals than between individuals.  This is done by 1) making
+ordination plots showing sample location and individual, and 2)
+comparing within-individual to between-individual distances for gene
+expression (1-PCC) and bug abundance (Bray-Curtis).
+
+\section{Input arguments}
+
+<<echo=TRUE>>=
+print( argslist )  ##show
+for (i in 1:length(argslist))
+    assign(names(argslist)[i], argslist[[i]])  ##assign to memory
+@ %def
+
+Needed libraries:
+<<message=FALSE>>=
+library(affy)
+library(ecodist)
+@ %def 
+
+\section{Load data}
+
+<<loaddata, echo=TRUE>>=
+all.data <- readPCL(clustering.outfile, number.pheno.rows=0)[[1]]
+pheno.data <- all.data[, c("ISCORE", "Antibiotics", "Outcome", "Location", "individual")]
+rm(all.data)
+full.gene.data <- t(as.matrix(read.csv(expr.all.outfile, as.is=TRUE, row.names=1)))
+full.gene.data <- full.gene.data[match(rownames(pheno.data), rownames(full.gene.data)), ]
+full.bug.data <- read.csv(bugs.all.outfile, as.is=TRUE, row.names=1)
+full.bug.data <- t(full.bug.data)
+full.bug.data <- full.bug.data[match(rownames(pheno.data), rownames(full.bug.data)), ]
+stopifnot(identical(all.equal(rownames(full.gene.data), rownames(pheno.data)), TRUE))
+stopifnot(identical(all.equal(rownames(full.bug.data), rownames(pheno.data)), TRUE))
+@ 
+
+\section{Create ExpressionSets and limit to paired data}
+
+<<>>=
+eset.gene <- ExpressionSet(assayData=t(full.gene.data), phenoData=AnnotatedDataFrame(pheno.data))
+eset.bug  <- ExpressionSet(assayData=t(full.bug.data), phenoData=AnnotatedDataFrame(pheno.data))
+@ %def 
+
+Keep only paired samples (those for which pouch and PPI are both available for the same patient):
+<<>>=
+eset.bug <- eset.bug[, eset.bug$individual %in% 
+                     names(table(eset.bug$individual))[table(eset.bug$individual) == 2]]
+eset.gene <- eset.gene[, sampleNames(eset.bug)]
+eset.gene
+eset.bug
+@ %def 
+
+Pearson correlation for gene expression, Bray-Curtis for bugs:
+<<>>=
+gene.dist <- as.dist( 1 - cor(exprs(eset.gene)) )
+bug.dist <- ecodist::distance(t(exprs(eset.bug)), method="bray-curtis")
+@ 
+
+<<echo=FALSE, fig.cap="PCoA of Pearson Correlation distance for gene expression, with PPI and pouch samples of an individual connected by a line segment.">>=
+gene.mds <- cmdscale(gene.dist)
+plot( gene.mds, type='p', xlab="MDS 1", ylab="MDS 2", pch=19, cex=0.5,
+     main="Expression Profiles MDS plot")
+for (indiv in unique(as.character(eset.gene$individual))){
+    samples <- sampleNames(eset.gene)[eset.gene$individual %in% indiv]
+    segments(x0=gene.mds[samples[1], 1], y0=gene.mds[samples[1], 2],
+             x1=gene.mds[samples[2], 1], y1=gene.mds[samples[2], 2])
+}
+@ 
+
+
+<<echo=FALSE, fig.cap="PCoA of Bray-Curtis distance for bug abundance, with PPI and pouch samples of an individual connected by a line segment.">>=
+bug.mds <- cmdscale(bug.dist)
+plot( bug.mds, type='p', xlab="MDS 1", ylab="MDS 2", pch=1, cex=0.5,
+     main="Microbiome (Bray-Curtis Distance)")
+for (indiv in unique(as.character(eset.bug$individual))){
+    samples <- sampleNames(eset.bug)[eset.bug$individual %in% indiv]
+    segments(x0=bug.mds[samples[1], 1], y0=bug.mds[samples[1], 2],
+             x1=bug.mds[samples[2], 1], y1=bug.mds[samples[2], 2])
+}
+@ 
+
+
+<<echo=FALSE, fig.cap="Comparison of Bray-Curtis distance between samples within individuals, and between individuals">>=
+bug.compdist <- list()
+bug.compdist$within <- sapply(unique(eset.bug$individual), function(id){
+    mydist <- distance(t(exprs(eset.bug[, eset.bug$individual %in% id])), method="bray-curtis")
+    return(as.numeric(mydist))
+})
+bug.compdist$between <- sapply(unique(eset.bug$individual), function(id){
+    mydist <- distance(t(exprs(eset.bug[, -match(id, eset.bug$individual)])), method="bray-curtis")
+    return(as.numeric(mydist))
+})
+bug.compdist$between <- as.numeric(bug.compdist$between)
+boxplot(bug.compdist, ylab="Bray-Curtis Distance", 
+        boxwex=0.25, col="grey",
+        main="Bray-Curtis distance between bug abundances")
+@ 
+
+
+<<echo=FALSE, fig.cap="Comparison of Pearson Correlation distance between gene expression profiles within individuals, and between individuals">>=
+gene.compdist <- list()
+gene.compdist$within <- sapply(unique(eset.gene$individual), function(id){
+    mydist <- as.dist(1-cor(exprs(eset.gene[, eset.gene$individual %in% id])))
+    return(as.numeric(mydist))
+})
+gene.compdist$between <- sapply(unique(eset.gene$individual), function(id){
+    mydist <- as.dist(1-cor(exprs(eset.gene[, -match(id, eset.gene$individual)])))
+    return(as.numeric(mydist))
+})
+gene.compdist$between <- as.numeric(gene.compdist$between)
+boxplot(gene.compdist, ylab="1 - Pearson Correlation", 
+        boxwex=0.25, col="grey",
+        main="Pearson Correlation distance between gene expression profiles")
+@ 
+
+\newpage
+\subsection{Session Info}
+<<sessioninfo>>=
+sessionInfo()
+@
+
+
+\end{document}
