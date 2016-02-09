@@ -1,0 +1,325 @@
+#genes from Jostins et al 
+Gene_Symbol	EntrezID													
+PTPN22	26191													
+TNFSF18	8995													
+UCN	7349													
+TXK	7294													
+IL31RA	133396													
+CREB5	9586													
+RIPK2	8767													
+SPRED1	161742													
+NOD2	64127													
+LGALS9	3965													
+DBP	1628													
+IFNGR2	3460													
+TNFRSF14	8764													
+PRKCD	5580													
+NFKB1	4790													
+CARD11	84433													
+IRF5	3663													
+ITGAL	3683													
+ADA	100													
+TNFRSF18	8784													
+TNFRSF9	3604													
+IL23R	149233													
+RORC	6097													
+CD48	962													
+FCGR2A	2212													
+C1orf53	388722													
+IL24	11009													
+FOSL2	2355													
+RELA	5970													
+SPRED2	200734													
+IL18RAP	8807													
+IFIH1	64135													
+STAT1	6772													
+SLC11A1	6556													
+GPR35	2859													
+MST1R	4486													
+IL8	3576													
+IL2	3558													
+DAP	1611													
+PTGER4	5734													
+IL13	3596													
+SPRY4	81848													
+TNIP1	10318													
+IL12B	3593													
+DOK3	79930													
+TRAF3IP2	10758													
+TNFAIP3	7128													
+CCR6	1235													
+ZPBP	11055													
+EPO	2056													
+TRIB1	10221													
+JAK2	3717													
+NFIL3	4783													
+TNFSF8	944													
+CARD9	64170													
+IL2RA	3559													
+MAP3K8	1326													
+CREM	1390													
+CD6	923													
+RPS6KA4	8986													
+CXCR5	643													
+IFNG	3458													
+GPR183	1880													
+FOS	2353													
+GALC	2581													
+SMAD3	4088													
+CRTC3	64784													
+LITAF	9516													
+RABEP2	79874													
+IRF8	3394													
+CCL13	6357													
+IKZF3	22806													
+STAT5B	6777													
+SMAD7	4092													
+CD226	10666													
+TYK2	7297													
+CEBPG	1054													
+NLRP7	199713													
+MMP9	4318													
+CEBPB	1051													
+ICOSLG	23308													
+MAPK1	5594													
+LIF	3976													
+ATF4	468													
+FASLG	356													
+IL6ST	3572													
+RASGRP1	10125													
+NOS2	4843													
+SPHK2	56848													
+IFNAR2	3455													
+HNF4A	3172													
+TNFRSF4	7293													
+SLAMF1	6504													
+FCGR2B	2213													
+PIGR	5284													
+BRE	9577													
+FOSL1	8061													
+IL1R2	7850													
+STAT4	6775													
+CXCR1	3577													
+UCN2	90226													
+CXCL1	2919													
+IL21	59067													
+CSF2	1437													
+FYN	2534													
+RPS6KA2	6196													
+TNFSF15	9966													
+IL15RA	3601													
+CD5	921													
+IL26	55801													
+GPR65	8477													
+SOCS1	8651													
+IL27	246778													
+CCL11	6356													
+STAT3	6774													
+PPAN-P2RY11	692312													
+NLRP2	55655													
+CD40	958													
+OSM	5008													
+TAB1	10454													
+IZUMO1	284359													
+IL10RB	3588													
+FCGR3A	2214													
+IL20	50604													
+IL18R1	8809													
+CXCR2	3579													
+GPX1	2876													
+CXCL6	6372													
+IRF1	3659													
+IL22	50616													
+CCL2	6347													
+STAT5A	6776													
+ICAM1	3383													
+IFNAR1	3454													
+IL19	29949													
+IL1R1	3554													
+PFKFB4	5210													
+CXCL3	2921													
+IL4	3565													
+MAPKAPK2	9261													
+IL1RL1	9173													
+IP6K2	51447													
+PF4	5196													
+IL5	3567													
+IL10	3586													
+IL1RL2	8808													
+CXCL5	6374													
+IL3	3562													
+FAIM3	9214													
+CXCL2	2920													
+TEC	7006													
+ITPKA	3706													
+CALM3	808													
+IL12RB2	3595													
+HSPA6	3310													
+REL	5966													
+PHACTR2	9749													
+ADAM30	11085													
+ATG16L1	55054													
+FUT2	2524													
+FAM55A	120400													
+UBQLN4	56893													
+ITLN1	55600													
+MST1	4485													
+SLC22A4	6583													
+REV3L	5980													
+MUC19	283463													
+ZPBP2	124626													
+TUBD1	51174													
+ZNF831	128611													
+YDJC	150223													
+FAM55D	54827													
+BSN	8927													
+GSDMB	55876													
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
+														
